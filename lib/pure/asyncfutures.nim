@@ -235,10 +235,6 @@ proc fail*[T](future: Future[T], error: ref Exception) =
   future.callbacks.call()
   when isFutureLoggingEnabled: logFutureFinish(future)
 
-proc clearCallbacks*(future: FutureBase) =
-  future.callbacks.function = nil
-  future.callbacks.next = nil
-
 proc addCallback*(future: FutureBase, cb: proc() {.closure, gcsafe.}) =
   ## Adds the callbacks proc to be called when the future completes.
   ##
