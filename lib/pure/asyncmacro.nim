@@ -39,7 +39,7 @@ template createCb(retFutureSym, iteratorNameSym,
             break
 
         if next == nil:
-          if not retFutUnown.finished:
+          if not retFutureSym.finished:
             let msg = "Async procedure ($1) yielded `nil`, are you await'ing a " &
                     "`nil` Future?"
             raise newException(AssertionError, msg % strName)
@@ -50,12 +50,12 @@ template createCb(retFutureSym, iteratorNameSym,
             {.pop.}
     except:
       futureVarCompletions
-      if retFutUnown.finished:
+      if retFutureSym.finished:
         # Take a look at tasyncexceptions for the bug which this fixes.
         # That test explains it better than I can here.
         raise
       else:
-        retFutUnown.fail(getCurrentException())
+        retFutureSym.fail(getCurrentException())
   identName()
 
 template useVar(result: var NimNode, futureVarNode: NimNode, valueReceiver,
@@ -252,6 +252,7 @@ proc asyncSingleProc(prc: NimNode): NimNode {.compileTime.} =
 
   # -> var retFuture = newFuture[T]()
   var retFutureSym = genSym(nskVar, "retFuture")
+  var retFutureCursorSym = genSym(nskVar, "retFutureCursor")
   var subRetType =
     if returnType.kind == nnkEmpty: newIdentNode("void")
     else: baseType
@@ -262,6 +263,10 @@ proc asyncSingleProc(prc: NimNode): NimNode {.compileTime.} =
           newIdentNode("newFuture"),
           subRetType),
       newLit(prcName)))) # Get type from return type of this proc
+  outerProcBody.add newVarStmt(
+    nnkPragmaExpr.newTree(retFutureCursorSym,
+                          nnkPragma.newTree(newIdentNode("cursor"))),
+                          retFutureSym)
 
   # -> iterator nameIter(): FutureBase {.closure.} =
   # ->   {.push warning[resultshadowed]: off.}
@@ -270,7 +275,7 @@ proc asyncSingleProc(prc: NimNode): NimNode {.compileTime.} =
   # ->   <proc_body>
   # ->   complete(retFuture, result)
   var iteratorNameSym = genSym(nskIterator, $prcName & "Iter")
-  var procBody = prc.body.processBody(retFutureSym, subtypeIsVoid,
+  var procBody = prc.body.processBody(retFutureCursorSym, subtypeIsVoid,
                                     futureVarIdents)
   # don't do anything with forward bodies (empty)
   if procBody.kind != nnkEmpty:
@@ -290,10 +295,10 @@ proc asyncSingleProc(prc: NimNode): NimNode {.compileTime.} =
 
       procBody.add(
         newCall(newIdentNode("complete"),
-          retFutureSym, newIdentNode("result"))) # -> complete(retFuture, result)
+          retFutureCursorSym, newIdentNode("result"))) # -> complete(retFuture, result)
     else:
       # -> complete(retFuture)
-      procBody.add(newCall(newIdentNode("complete"), retFutureSym))
+      procBody.add(newCall(newIdentNode("complete"), retFutureCursorSym))
 
     var closureIterator = newProc(iteratorNameSym, [parseExpr("owned(FutureBase)")],
                                   procBody, nnkIteratorDef)
@@ -310,7 +315,7 @@ proc asyncSingleProc(prc: NimNode): NimNode {.compileTime.} =
     # NOTE: The NimAsyncContinueSuffix is checked for in asyncfutures.nim to produce
     # friendlier stack traces:
     var cbName = genSym(nskProc, prcName & NimAsyncContinueSuffix)
-    var procCb = getAst createCb(retFutureSym, iteratorNameSym,
+    var procCb = getAst createCb(retFutureCursorSym, iteratorNameSym,
                          newStrLitNode(prcName),
                          cbName,
                          createFutureVarCompletions(futureVarIdents, nil))
