@@ -23,7 +23,7 @@ type
     finished: bool
     error*: ref Exception              ## Stored exception
     errorStackTrace*: string
-    when not defined(release):
+    when not defined(release) and not defined(danger):
       stackTrace: seq[StackTraceEntry] ## For debugging purposes only.
       id: int
       fromProc: string
@@ -36,7 +36,7 @@ type
   FutureError* = object of Exception
     cause*: FutureBase
 
-when not defined(release):
+when not defined(release) and not defined(danger):
   var currentID = 0
 
 const isFutureLoggingEnabled* = defined(futureLogging)
@@ -106,7 +106,7 @@ proc callSoon*(cbproc: proc ()) =
 template setupFutureBase(fromProc: string) =
   new(result)
   result.finished = false
-  when not defined(release):
+  when not defined(release) and not defined(danger):
     result.stackTrace = getStackTraceEntries()
     result.id = currentID
     result.fromProc = fromProc
@@ -138,7 +138,7 @@ proc clean*[T](future: FutureVar[T]) =
 proc checkFinished[T](future: Future[T]) =
   ## Checks whether `future` is finished. If it is then raises a
   ## ``FutureError``.
-  when not defined(release):
+  when not defined(release) and not defined(danger):
     if future.finished:
       var msg = ""
       msg.add("An attempt was made to complete a Future more than once. ")
@@ -156,54 +156,33 @@ proc checkFinished[T](future: Future[T]) =
       err.cause = future
       raise err
 
-proc call(callbacks: var CallbackList) =
-  when not defined(nimV2):
-    # strictly speaking a little code duplication here, but we strive
-    # to minimize regressions and I'm not sure I got the 'nimV2' logic
-    # right:
-    var current = callbacks
-    while true:
-      if not current.function.isNil:
-        callSoon(current.function)
-
-      if current.next.isNil:
-        break
-      else:
-        current = current.next[]
-  else:
-    var currentFunc = unown callbacks.function
-    var currentNext = unown callbacks.next
-
-    while true:
-      if not currentFunc.isNil:
-        callSoon(currentFunc)
-
-      if currentNext.isNil:
-        break
-      else:
-        currentFunc = currentNext.function
-        currentNext = unown currentNext.next
-
-  # callback will be called only once, let GC collect them now
-  callbacks.next = nil
+proc clearCallbacks*(callbacks: var CallbackList) =
   callbacks.function = nil
+  if callbacks.next != nil:
+    callbacks = callbacks.next[]
+    callbacks.clearCallbacks
+
+proc clearCallbacks*(future: FutureBase) =
+  clearCallbacks(future.callbacks)
+
+proc call(callbacks: var CallbackList) =
+  ## run all the callbacks in the list, destroying them in the process
+  if not callbacks.function.isNil:
+    callSoon(callbacks.function)
+  if callbacks.next.isNil:
+    disarm callbacks.function
+  else:
+    callbacks = callbacks.next[]
+    callbacks.call
 
 proc add(callbacks: var CallbackList, function: CallbackFunc) =
+  ## add a callback to the callbacklist
   if callbacks.function.isNil:
-    callbacks.function = function
     assert callbacks.next == nil
   else:
-    let newCallback = new(ref CallbackList)
-    newCallback.function = function
-    newCallback.next = nil
-
-    if callbacks.next == nil:
-      callbacks.next = newCallback
-    else:
-      var last = callbacks.next
-      while last.next != nil:
-        last = last.next
-      last.next = newCallback
+    callbacks.next = (ref CallbackList)(next: callbacks.next,
+                                        function: callbacks.function)
+  callbacks.function = function
 
 proc complete*[T](future: Future[T], val: T) =
   ## Completes ``future`` with value ``val``.
@@ -345,7 +324,7 @@ proc `$`*(entries: seq[StackTraceEntry]): string =
       result.add(spaces(indent+2) & "## " & hint & "\n")
 
 proc injectStacktrace[T](future: Future[T]) =
-  when not defined(release):
+  when not defined(release) and not defined(danger):
     const header = "\nAsync traceback:\n"
 
     var exceptionMsg = future.error.msg
