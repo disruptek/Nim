@@ -157,16 +157,18 @@ proc checkFinished[T](future: Future[T]) =
       raise err
 
 proc clearCallbacks*(callbacks: var CallbackList) =
-  callbacks.function = nil
+  ## Clear a future's callbacks.
+  disarm callbacks.function
   if callbacks.next != nil:
     callbacks = callbacks.next[]
     callbacks.clearCallbacks
 
 proc clearCallbacks*(future: FutureBase) =
+  ## Clear a future's callbacks.
   clearCallbacks(future.callbacks)
 
 proc call(callbacks: var CallbackList) =
-  ## run all the callbacks in the list, destroying them in the process
+  ## Run all the callbacks in the list, destroying them in the process.
   if not callbacks.function.isNil:
     callSoon(callbacks.function)
   if callbacks.next.isNil:
@@ -176,7 +178,7 @@ proc call(callbacks: var CallbackList) =
     callbacks.call
 
 proc add(callbacks: var CallbackList, function: CallbackFunc) =
-  ## add a callback to the callbacklist
+  ## Add a callback to the callbacklist.
   if callbacks.function.isNil:
     assert callbacks.next == nil
   else:
