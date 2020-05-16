@@ -56,6 +56,15 @@ function build-test
 	end
 end
 
+function inc-test
+	if command $nim c --verbosity:1 --listcmd --nimcache:goats --incremental:on --debuginfo --embedsrc --stackTrace:on $test
+		notice incremental test built
+	else
+		error failed incremental build
+		return 1
+	end
+end
+
 function run-test
 	if command $binary
 		notice test ran okay
@@ -73,6 +82,6 @@ and build-sanity
 or exit
 and build-test
 or exit
-and build-test
+and inc-test
 or exit
 and run-test
