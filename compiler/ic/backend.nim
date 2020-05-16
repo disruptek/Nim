@@ -151,11 +151,18 @@ proc typeName(m: ModuleOrProc; typ: PType; shorten = false): string =
     else:
       result = mangle(m, typ.sym)
 
+template maybeAppendCounter(result: typed; count: int) =
+  if count > 0:
+    result.add "_"
+    result.add $count
+
+proc getOrSet(conflicts: ConflictsTable; name: string; id: int): int
+
 proc getTypeName(m: BModule; typ: PType): Rope =
   block found:
     # XXX: is this safe (enough)?
-    if typ.loc.r != nil:
-      break
+    #if typ.loc.r != nil:
+    #  break
 
     # try to find the actual type
     var t = typ
@@ -163,7 +170,7 @@ proc getTypeName(m: BModule; typ: PType): Rope =
       # settle for a symbol if we can find one
       if t.sym != nil:
         if {sfImportc, sfExportc} * t.sym.flags != {}:
-          m.setLocationRope typ:
+          result =
             if t.sym.loc.r != nil:
               # use an existing name if previously mangled
               t.sym.loc.r
@@ -178,7 +185,7 @@ proc getTypeName(m: BModule; typ: PType): Rope =
       t = t.lastSon
 
     assert t != nil
-    m.setLocationRope typ:
+    result =
       if t.loc.r == nil:
         # create one using the closest type
         typeName(m, t).rope
@@ -186,9 +193,11 @@ proc getTypeName(m: BModule; typ: PType): Rope =
         # use the closest type which already has a name
         t.loc.r
 
-  result = typ.loc.r
   if result == nil:
     internalError(m.config, "getTypeName: " & $typ.kind)
+  let counter = m.sigConflicts.getOrSet($result, typ.uniqueId)
+  result.maybeAppendCounter counter
+  m.setLocationRope typ, result
 
 proc getTypeName*(m: BModule; typ: PType; sig: SigHash): Rope =
   result = getTypeName(m, typ)
@@ -229,6 +238,7 @@ proc mangle*(m: ModuleOrProc; s: PSym): string =
   {.warning: "confirm that the module id matches the symbol's module".}
   #if getModule(s).id.abs != m.module.id.abs:
   # XXX: we don't do anything special with regard to m.hcrOn (Hot Code Reload)
+  assert result.len > 0
 
 proc getSetConflictFromCache(m: BModule; s: PSym; create = true): string =
   template g(): ModuleGraph = m.g.graph
@@ -265,26 +275,24 @@ proc getSetConflictFromCache(m: BModule; s: PSym; create = true): string =
   assert counter > 0
   m.sigConflicts[sid] = counter
 
-proc getOrSet(conflicts: ConflictsTable; name: string;
-              counter: var int; id: int): bool =
+proc getOrSet(conflicts: ConflictsTable; name: string; id: int): int =
   ## set the counter to indicate the number of collisions at the time the
   ## name was added to the conflicts table.  requires a unique id for the
   ## symbol being added to the table.  returns true if this is the
   ## first instance of the name to enter the table.
   let sid = $id
-  counter = conflicts.getOrDefault(sid, -1)
-  if counter == -1:
-    counter = conflicts.getOrDefault(name, -1)
-    if counter == -1:
+  result = conflicts.getOrDefault(sid, -1)
+  if result == -1:
+    result = conflicts.getOrDefault(name, -1)
+    if result == -1:
       # start counting at zero so we can omit an initial append
-      counter = 0
+      result = 0
       # set the value for the name indicate the NEXT available counter
       conflicts[name] = 1
     else:
       # set the value for the name indicate the NEXT available counter
       inc conflicts[name]
-    conflicts[sid] = counter
-    result = true
+    conflicts[sid] = result
 
 proc getSetConflict(p: ModuleOrProc; s: PSym;
                      create = true): tuple[name: string; counter: int] =
@@ -298,7 +306,6 @@ proc getSetConflict(p: ModuleOrProc; s: PSym;
       p.module
   template g(): ModuleGraph = m.g.graph
   var counter: int
-  let sid = $s.id
   var name: string
 
   block:
@@ -313,27 +320,22 @@ proc getSetConflict(p: ModuleOrProc; s: PSym;
           assert false, "this code needs work"
           break
 
-    name = p.mangle(s)
+    name = mangle(p, s)
 
-  if p.sigConflicts.getOrSet(name, counter, s.id):
+  counter = p.sigConflicts.getOrSet(name, s.id)
+  if counter == 0:
+    # it's the first instance using this name
     if not create:
       debug s
       assert false, "cannot find existing name for: " & name
   result = (name: name, counter: counter)
-
   # FIXME: add a pass to warm up the conflicts cache
-  assert result.name.len > 0
-
-template maybeAppendCounter(result: typed; count: int) =
-  if count > 0:
-    result.add "_"
-    result.add $count
 
 proc idOrSig*(m: ModuleOrProc; s: PSym): Rope =
   ## produce a unique identity-or-signature for the given module and symbol
   let conflict = m.getSetConflict(s, create = true)
   result = conflict.name.rope
-  result.maybeAppendCounter(conflict.counter)
+  result.maybeAppendCounter conflict.counter
 
 template tempNameForLabel*(m: BModule; label: int): string =
   ## create an appropriate temporary name for the given label
@@ -352,8 +354,8 @@ proc getTempNameImpl(m: BModule; id: int): string =
   result = m.tempNameForLabel(id)
   # make sure it's not in the conflicts table
   assert result notin m.sigConflicts
-  # make sure it's in the conflicts table
-  m.sigConflicts[result] = 0
+  # make sure it's in the conflicts table with the NEXT available counter
+  m.sigConflicts[result] = 1
 
 proc getTempName*(m: BModule; n: PNode; r: var Rope): bool =
   ## create or retrieve a temporary name for the given node; returns
@@ -367,9 +369,9 @@ proc getTempName*(m: BModule; n: PNode; r: var Rope): bool =
   else:
     name = m.tempNameForLabel(id)
     # make sure it's not in the conflicts table under a different id
-    assert m.sigConflicts.getOrDefault(name, 0) == 0
-    # make sure it's in the conflicts table
-    m.sigConflicts[name] = 0
+    assert m.sigConflicts.getOrDefault(name, 1) == 1
+    # make sure it's in the conflicts table with the NEXT available counter
+    m.sigConflicts[name] = 1
 
   # add or append it to the result
   if r == nil:
@@ -1394,8 +1396,8 @@ proc setLocation*(m: BModule; p: PSym or PType; t: TLoc)
     assert owner != nil
     #  if getModule(p) == nil:
     #    p.owner = m.module
-    if abs(owner.id) != abs(mom.id):
-      echo "setloc in wrong module; ", owner.name.s, " versus ", mom.name.s
+    {.warning: "add in guard for setloc in wrong module".}
+    # assert abs(owner.id) == abs(mom.id)
   elif p is PType:
     let id = p.uniqueId
     let k = nkType
