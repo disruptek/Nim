@@ -129,8 +129,8 @@
 #   break :stateLoop
 
 import
-  ast, astalgo, msgs, idents,
-  renderer, magicsys, lowerings, lambdalifting, modulegraphs, lineinfos
+  ast, msgs, idents, renderer, magicsys, lowerings, lambdalifting,
+  modulegraphs, lineinfos, safeadd
 
 type
   Ctx = object

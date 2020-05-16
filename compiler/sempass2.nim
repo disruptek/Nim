@@ -8,9 +8,10 @@
 #
 
 import
+
   intsets, ast, astalgo, msgs, renderer, magicsys, types, idents, trees,
   wordrecg, strutils, options, guards, lineinfos, semfold, semdata,
-  modulegraphs
+  modulegraphs, ic
 
 when defined(useDfa):
   import dfa
@@ -80,6 +81,16 @@ type
     graph: ModuleGraph
     c: PContext
   PEffects = var TEffects
+
+template isSealed(a: PEffects): bool = isSealed(a.c)
+template witness(body: untyped): untyped {.dirty.} =
+  ## perform a dangerous operation on an IC context; ensure it's unsealed!
+  assert not isSealed(a)
+  if not isSealed(a):
+    body
+template witness(a: PEffects; body: untyped): untyped {.dirty.} =
+  witness:
+    body
 
 proc `<`(a, b: TLockLevel): bool {.borrow.}
 proc `<=`(a, b: TLockLevel): bool {.borrow.}
@@ -288,9 +299,9 @@ proc throws(tracked, n, orig: PNode) =
     if orig != nil:
       let x = copyNode(n)
       x.info = orig.info
-      tracked.add x
+      tracked.safeAdd x
     else:
-      tracked.add n
+      tracked.safeAdd n
 
 proc getEbase(g: ModuleGraph; info: TLineInfo): PType =
   result = g.sysTypeFromName(info, "Exception")
@@ -320,7 +331,8 @@ proc addEffect(a: PEffects, e, comesFrom: PNode) =
 
   if e.typ != nil:
     if optNimV1Emulation in a.config.globalOptions or not isDefectException(e.typ):
-      throws(a.exc, e, comesFrom)
+      witness:
+        throws(a.exc, e, comesFrom)
 
 proc addTag(a: PEffects, e, comesFrom: PNode) =
   var aa = a.tags
@@ -328,7 +340,8 @@ proc addTag(a: PEffects, e, comesFrom: PNode) =
     # we only track the first node that can have the effect E in order
     # to safe space and time.
     if sameType(aa[i].typ.skipTypes(skipPtrs), e.typ.skipTypes(skipPtrs)): return
-  throws(a.tags, e, comesFrom)
+  witness:
+    throws(a.tags, e, comesFrom)
 
 proc mergeEffects(a: PEffects, b, comesFrom: PNode) =
   if b.isNil:
@@ -752,7 +765,7 @@ proc track(tracked: PEffects, n: PNode) =
   of nkRaiseStmt:
     if n[0].kind != nkEmpty:
       n[0].info = n.info
-      #throws(tracked.exc, n[0])
+      #witness: throws(tracked.exc, n[0])
       addEffect(tracked, n[0], nil)
       for i in 0..<n.safeLen:
         track(tracked, n[i])

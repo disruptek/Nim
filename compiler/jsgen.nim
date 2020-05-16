@@ -33,7 +33,7 @@ import
   nversion, msgs, idents, types, tables,
   ropes, math, passes, ccgutils, wordrecg, renderer,
   intsets, cgmeth, lowerings, sighashes, modulegraphs, lineinfos, rodutils,
-  transf, injectdestructors, sourcemap, json, sets
+  transf, injectdestructors, sourcemap, json, sets, ccgtypes
 
 
 from modulegraphs import ModuleGraph, PPassContext
@@ -43,7 +43,7 @@ type
     module: PSym
     graph: ModuleGraph
     config: ConfigRef
-    sigConflicts: CountTable[SigHash]
+    sigConflicts: CountTableRef[SigHash]
 
   BModule = ref TJSGen
   TJSTypeKind = enum       # necessary JS "types"
@@ -255,13 +255,16 @@ proc mangleName(m: BModule, s: PSym): Rope =
       result = rope(x)
     # From ES5 on reserved words can be used as object field names
     if s.kind != skField:
-      if m.config.hcrOn:
-        # When hot reloading is enabled, we must ensure that the names
-        # of functions and types will be preserved across rebuilds:
-        result.add(idOrSig(s, m.module.name.s, m.sigConflicts))
+      when true:
+        result.add(idOrSig(m, s))
       else:
-        result.add("_")
-        result.add(rope(s.id))
+        if m.config.hcrOn:
+          # When hot reloading is enabled, we must ensure that the names
+          # of functions and types will be preserved across rebuilds:
+          result.add(idOrSig(s, m.module.name.s, m.sigConflicts))
+        else:
+          result.add("_")
+          result.add(rope(s.id))
     s.loc.r = result
 
 proc escapeJSString(s: string): string =
@@ -2538,7 +2541,7 @@ proc gen(p: PProc, n: PNode, r: var TCompRes) =
 proc newModule(g: ModuleGraph; module: PSym): BModule =
   new(result)
   result.module = module
-  result.sigConflicts = initCountTable[SigHash]()
+  result.sigConflicts = newCountTable[SigHash]()
   if g.backend == nil:
     g.backend = newGlobals()
   result.graph = g

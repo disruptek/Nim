@@ -9,8 +9,10 @@
 
 ## Implements marshaling for the VM.
 
-import streams, json, intsets, tables, ast, astalgo, idents, types, msgs,
-  options, lineinfos
+import
+
+  streams, json, intsets, tables, ast, astalgo, idents, types, msgs,
+  options, lineinfos, safeadd
 
 proc ptrToInt(x: PNode): int {.inline.} =
   result = cast[int](x) # don't skip alignment

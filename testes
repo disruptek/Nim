@@ -1,0 +1,76 @@
+#!/bin/fish
+
+choosenim devel
+set summary "compiler testing"
+set app testes
+
+set test helloworld.nim
+set binary ./(string replace ".nim" "" "$test")
+
+set nim bin/nim_temp
+if test -n "$argv[1]"
+	set nim "$argv[1]"
+	echo testing $nim
+end
+
+function notice
+	notify-send --urgency=low --expire-time=2000 --app-name=$app "$summary" "$argv"
+end
+
+function warning
+	notify-send --urgency=normal --expire-time=3000 --app-name=$app "$summary" "$argv"
+end
+
+function error
+	notify-send --urgency=critical --expire-time=8000 --app-name=$app "$summary" "$argv"
+end
+
+function clean
+	rm -rf goats pigs
+end
+
+function build-compiler
+	if ./koch temp --verbosity:1 -d:nimIncremental --nimcache:nimcache --stackTrace:on
+		notice compiler built
+	else
+		error failed compiler build
+		return 1
+	end
+end
+
+function build-sanity
+	if command $nim c --verbosity:1 --nimcache:nimcache --listcmd --run --embedsrc --debuginfo --stackTrace:on $test
+		notice sanity built
+	else
+		error failed sanity build
+		return 1
+	end
+end
+
+function build-test
+	if command $nim c --verbosity:1 --listcmd --nimcache:goats --incremental:on --debuginfo --embedsrc --stackTrace:on $test
+		notice test built
+	else
+		error failed test build
+		return 1
+	end
+end
+
+function run-test
+	if command $binary
+		notice test ran okay
+	else
+		warning test execution failed
+		return 1
+	end
+end
+
+
+clean
+build-compiler
+or exit
+and build-sanity
+or exit
+and build-test
+or exit
+and run-test

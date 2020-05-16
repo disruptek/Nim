@@ -10,8 +10,11 @@
 ## This module implements code generation for methods.
 
 import
-  intsets, options, ast, msgs, idents, renderer, types, magicsys,
+
+  intsets, options, ast, msgs, idents, renderer, types, magicsys, ic,
   sempass2, strutils, modulegraphs, lineinfos
+
+template add(father, son: PNode) = father.safeAdd son
 
 proc genConv(n: PNode, d: PType, downcast: bool; conf: ConfigRef): PNode =
   var dest = skipTypes(d, abstractPtrs)
@@ -116,7 +119,7 @@ proc createDispatcher(s: PSym): PSym =
   if disp.typ.callConv == ccInline: disp.typ.callConv = ccDefault
   disp.ast = copyTree(s.ast)
   disp.ast[bodyPos] = newNodeI(nkEmpty, s.info)
-  disp.loc.r = nil
+  disp.loc.clearRope
   if s.typ[0] != nil:
     if disp.ast.len > resultPos:
       disp.ast[resultPos].sym = copySym(s.ast[resultPos].sym)

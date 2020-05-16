@@ -1,5 +1,7 @@
 
-import ast, idents, lineinfos, modulegraphs, magicsys
+import
+
+  ast, idents, lineinfos, modulegraphs, magicsys, safeadd
 
 proc genEnumToStrProc*(t: PType; info: TLineInfo; g: ModuleGraph): PSym =
   result = newSym(skProc, getIdent(g.cache, "$"), t.owner, info)
@@ -19,7 +21,7 @@ proc genEnumToStrProc*(t: PType; info: TLineInfo; g: ModuleGraph): PSym =
 
   var body = newNodeI(nkStmtList, info)
   var caseStmt = newNodeI(nkCaseStmt, info)
-  caseStmt.add(newSymNode dest)
+  caseStmt.add newSymNode(dest)
 
   # copy the branches over, but replace the fields with the for loop body:
   for i in 0..<t.n.len:
@@ -30,7 +32,7 @@ proc genEnumToStrProc*(t: PType; info: TLineInfo; g: ModuleGraph): PSym =
       newTree(nkStmtList, newTree(nkFastAsgn, newSymNode(res), newStrNode(val, info))))
     #newIntTypeNode(nkIntLit, field.position, t)
 
-  body.add(caseStmt)
+  body.add caseStmt
 
   var n = newNodeI(nkProcDef, info, bodyPos+2)
   for i in 0..<n.len: n[i] = newNodeI(nkEmpty, info)

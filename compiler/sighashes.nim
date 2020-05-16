@@ -104,7 +104,13 @@ proc hashType(c: var MD5Context, t: PType; flags: set[ConsiderFlag]) =
       if t.sym == nil or tfFromGeneric in t.flags:
         c.hashType t.lastSon, flags
     elif CoType in flags or t.sym == nil:
-      c.hashType t.lastSon, flags
+      # crash; sym is nil and CoProc in flags
+      if t.sons.len == 0:
+        # araq says these are typeclasses or some other generic goodness
+        echo "distinct w/o lastSon or t.sym"
+        c &= ".emptydistinct"
+      else:
+        c.hashType t.lastSon, flags
     else:
       c.hashSym(t.sym)
   of tyGenericInst:
@@ -171,7 +177,10 @@ proc hashType(c: var MD5Context, t: PType; flags: set[ConsiderFlag]) =
       hashType c, t[0], flags
   of tyRef, tyPtr, tyGenericBody, tyVar:
     c &= char(t.kind)
-    c.hashType t.lastSon, flags
+    if t.len > 0:
+      c.hashType t.lastSon, flags
+    else:
+      c &= ".emptyptr"
     if tfVarIsPtr in t.flags: c &= ".varisptr"
   of tyFromExpr:
     c &= char(t.kind)
@@ -263,6 +272,8 @@ proc hashProc*(s: PSym): SigHash =
   c &= p.name.s
   c &= "."
   c &= m.name.s
+  c &= "."
+  c &= s.name.s
   if sfDispatcher in s.flags:
     c &= ".dispatcher"
   # so that createThread[void]() (aka generic specialization) gets a unique
@@ -375,31 +386,11 @@ proc symBodyDigest*(graph: ModuleGraph, sym: PSym): SigHash =
     c.md5Final(result.MD5Digest)
     graph.symBodyHashes[sym.id] = result
 
-proc idOrSig*(s: PSym, currentModule: string,
-              sigCollisions: var CountTable[SigHash]): Rope =
-  if s.kind in routineKinds and s.typ != nil:
-    # signatures for exported routines are reliable enough to
-    # produce a unique name and this means produced C++ is more stable wrt
-    # Nim changes:
-    let sig = hashProc(s)
-    result = rope($sig)
-    #let m = if s.typ.callConv != ccInline: findPendingModule(m, s) else: m
-    let counter = sigCollisions.getOrDefault(sig)
-    #if sigs == "_jckmNePK3i2MFnWwZlp6Lg" and s.name.s == "contains":
-    #  echo "counter ", counter, " ", s.id
-    if counter != 0:
-      result.add "_" & rope(counter+1)
-    # this minor hack is necessary to make tests/collections/thashes compile.
-    # The inlined hash function's original module is ambiguous so we end up
-    # generating duplicate names otherwise:
-    if s.typ.callConv == ccInline:
-      result.add rope(currentModule)
-    sigCollisions.inc(sig)
-  else:
-    let sig = hashNonProc(s)
-    result = rope($sig)
-    let counter = sigCollisions.getOrDefault(sig)
-    if counter != 0:
-      result.add "_" & rope(counter+1)
-    sigCollisions.inc(sig)
-
+proc sigHash*(n: PNode): SigHash =
+  const
+    consider = {CoProc, CoType, CoOwnerSig, CoConsiderOwned,
+                CoDistinct, CoHashTypeInsideNode}
+  var c: MD5Context
+  md5Init c
+  hashTree(c, n, consider)
+  md5Final c, result.MD5Digest

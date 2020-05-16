@@ -10,9 +10,10 @@
 # This module implements semantic checking for pragmas
 
 import
-  os, condsyms, ast, astalgo, idents, semdata, msgs, renderer,
-  wordrecg, ropes, options, strutils, extccomp, math, magicsys, trees,
-  types, lookups, lineinfos, pathutils, linter
+
+  os, condsyms, ast, astalgo, idents, semdata, msgs, renderer, wordrecg,
+  ropes, options, strutils, extccomp, math, magicsys, trees, types, ic,
+  lookups, lineinfos, pathutils, linter
 
 const
   FirstCallConv* = wNimcall
@@ -144,20 +145,22 @@ proc pragmaAsm*(c: PContext, n: PNode): char =
 
 proc setExternName(c: PContext; s: PSym, extname: string, info: TLineInfo) =
   # special cases to improve performance:
-  if extname == "$1":
-    s.loc.r = rope(s.name.s)
-  elif '$' notin extname:
-    s.loc.r = rope(extname)
-  else:
-    try:
-      s.loc.r = rope(extname % s.name.s)
-    except ValueError:
-      localError(c.config, info, "invalid extern name: '" & extname & "'. (Forgot to escape '$'?)")
+  c.mutateLocation s:
+    if extname == "$1":
+      loc.setRope s.name.s
+    elif '$' notin extname:
+      loc.setRope extname
+    else:
+      try:
+        loc.setRope extname % s.name.s
+      except ValueError:
+        localError(c.config, info, "invalid extern name: '" & extname & "'. (Forgot to escape '$'?)")
   when hasFFI:
     s.cname = $s.loc.r
   if c.config.cmd == cmdPretty and '$' notin extname:
     # note that '{.importc.}' is transformed into '{.importc: "$1".}'
-    s.loc.flags.incl(lfFullExternalName)
+    c.mutateLocation s:
+      loc.flags.incl lfFullExternalName
 
 proc makeExternImport(c: PContext; s: PSym, extname: string, info: TLineInfo) =
   setExternName(c, s, extname, info)
@@ -172,7 +175,8 @@ proc processImportCompilerProc(c: PContext; s: PSym, extname: string, info: TLin
   setExternName(c, s, extname, info)
   incl(s.flags, sfImportc)
   excl(s.flags, sfForward)
-  incl(s.loc.flags, lfImportCompilerProc)
+  c.mutateLocation s:
+    loc.flags.incl lfImportCompilerProc
 
 proc processImportCpp(c: PContext; s: PSym, extname: string, info: TLineInfo) =
   setExternName(c, s, extname, info)
@@ -319,9 +323,11 @@ proc processDynLib(c: PContext, n: PNode, sym: PSym) =
       var lib = getLib(c, libDynamic, expectDynlibNode(c, n))
       if not lib.isOverriden:
         addToLib(lib, sym)
-        incl(sym.loc.flags, lfDynamicLib)
+        c.mutateLocation sym:
+          loc.flags.incl lfDynamicLib
     else:
-      incl(sym.loc.flags, lfExportLib)
+      c.mutateLocation sym:
+        loc.flags.incl lfExportLib
     # since we'll be loading the dynlib symbols dynamically, we must use
     # a calling convention that doesn't introduce custom name mangling
     # cdecl is the default - the user can override this explicitly
@@ -529,13 +535,13 @@ proc processLink(c: PContext, n: PNode) =
   extccomp.addExternalFileToLink(c.config, found)
   recordPragma(c, n, "link", found.string)
 
-proc semAsmOrEmit*(con: PContext, n: PNode, marker: char): PNode =
+proc semAsmOrEmit*(c: PContext, n: PNode, marker: char): PNode =
   case n[1].kind
   of nkStrLit, nkRStrLit, nkTripleStrLit:
     result = newNode(if n.kind == nkAsmStmt: nkAsmStmt else: nkArgList, n.info)
     var str = n[1].strVal
     if str == "":
-      localError(con.config, n.info, "empty 'asm' statement")
+      localError(c.config, n.info, "empty 'asm' statement")
       return
     # now parse the string literal and substitute symbols:
     var a = 0
@@ -544,11 +550,11 @@ proc semAsmOrEmit*(con: PContext, n: PNode, marker: char): PNode =
       var sub = if b < 0: substr(str, a) else: substr(str, a, b - 1)
       if sub != "": result.add newStrNode(nkStrLit, sub)
       if b < 0: break
-      var c = strutils.find(str, marker, b + 1)
-      if c < 0: sub = substr(str, b + 1)
-      else: sub = substr(str, b + 1, c - 1)
+      var d = strutils.find(str, marker, b + 1)
+      if d < 0: sub = substr(str, b + 1)
+      else: sub = substr(str, b + 1, d - 1)
       if sub != "":
-        var e = searchInScopes(con, getIdent(con.cache, sub))
+        var e = searchInScopes(c, getIdent(c.cache, sub))
         if e != nil:
           when false:
             if e.kind == skStub: loadStub(e)
@@ -559,10 +565,10 @@ proc semAsmOrEmit*(con: PContext, n: PNode, marker: char): PNode =
       else:
         # an empty '``' produces a single '`'
         result.add newStrNode(nkStrLit, $marker)
-      if c < 0: break
-      a = c + 1
+      if d < 0: break
+      a = d + 1
   else:
-    illFormedAstLocal(n, con.config)
+    illFormedAstLocal(n, c.config)
     result = newNode(nkAsmStmt, n.info)
 
 proc pragmaEmit(c: PContext, n: PNode) =
@@ -849,7 +855,8 @@ proc singlePragma(c: PContext, sym: PSym, n: PNode, i: var int,
           localError(c.config, it.info, "power of two expected")
       of wNodecl:
         noVal(c, it)
-        incl(sym.loc.flags, lfNoDecl)
+        c.mutateLocation sym:
+          loc.flags.incl lfNoDecl
       of wPure, wAsmNoStackFrame:
         noVal(c, it)
         if sym != nil:
@@ -889,10 +896,11 @@ proc singlePragma(c: PContext, sym: PSym, n: PNode, i: var int,
         var lib = getLib(c, libHeader, getStrLitNode(c, it))
         addToLib(lib, sym)
         incl(sym.flags, sfImportc)
-        incl(sym.loc.flags, lfHeader)
-        incl(sym.loc.flags, lfNoDecl)
-        # implies nodecl, because otherwise header would not make sense
-        if sym.loc.r == nil: sym.loc.r = rope(sym.name.s)
+        c.mutateLocation sym:
+          loc.flags.incl {lfHeader, lfNoDecl}
+          # implies nodecl, because otherwise header would not make sense
+          if loc.r == nil:
+            loc.setRope sym.name.s
       of wNoSideEffect:
         noVal(c, it)
         if sym != nil:
@@ -1195,13 +1203,15 @@ proc overwriteLineInfo(n: PNode; info: TLineInfo) =
   for i in 0..<n.safeLen:
     overwriteLineInfo(n[i], info)
 
-proc mergePragmas(n, pragmas: PNode) =
+proc mergePragmas(c: PContext; n, pragmas: PNode) =
   var pragmas = copyTree(pragmas)
   overwriteLineInfo pragmas, n.info
-  if n[pragmasPos].kind == nkEmpty:
-    n[pragmasPos] = pragmas
-  else:
-    for p in pragmas: n[pragmasPos].add p
+  witness:
+    if n[pragmasPos].kind == nkEmpty:
+      n[pragmasPos] = pragmas
+    else:
+      for p in pragmas:
+        n[pragmasPos].add p
 
 proc implicitPragmas*(c: PContext, sym: PSym, n: PNode,
                       validPragmas: TSpecialWords) =
@@ -1216,16 +1226,19 @@ proc implicitPragmas*(c: PContext, sym: PSym, n: PNode,
             internalError(c.config, n.info, "implicitPragmas")
           inc i
         popInfoContext(c.config)
-        if sym.kind in routineKinds and sym.ast != nil: mergePragmas(sym.ast, o)
+        if sym.kind in routineKinds and sym.ast != nil:
+          c.mergePragmas(sym.ast, o)
 
     if lfExportLib in sym.loc.flags and sfExportc notin sym.flags:
       localError(c.config, n.info, ".dynlib requires .exportc")
     var lib = c.optionStack[^1].dynlib
     if {lfDynamicLib, lfHeader} * sym.loc.flags == {} and
         sfImportc in sym.flags and lib != nil:
-      incl(sym.loc.flags, lfDynamicLib)
+      c.mutateLocation sym:
+        loc.flags.incl lfDynamicLib
+        if loc.r == nil:
+          loc.setRope sym.name.s
       addToLib(lib, sym)
-      if sym.loc.r == nil: sym.loc.r = rope(sym.name.s)
 
 proc hasPragma*(n: PNode, pragma: TSpecialWord): bool =
   if n == nil: return false

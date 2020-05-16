@@ -11,19 +11,10 @@
 
 # ------------------------- Name Mangling --------------------------------
 
-import sighashes, modulegraphs
+import sighashes, modulegraphs, ic, ast
 from lowerings import createObj
 
-proc genProcHeader(m: BModule, prc: PSym, asPtr: bool = false): Rope
-
-proc isKeyword(w: PIdent): bool =
-  # Nim and C++ share some keywords
-  # it's more efficient to test the whole Nim keywords range
-  case w.id
-  of ccgKeywordsLow..ccgKeywordsHigh,
-     nimKeywordsLow..nimKeywordsHigh,
-     ord(wInline): return true
-  else: return false
+proc genProcHeader(p: BProc or BModule, prc: PSym, asPtr: bool = false): Rope
 
 proc mangleField(m: BModule; name: PIdent): string =
   result = mangle(name.s)
@@ -33,7 +24,7 @@ proc mangleField(m: BModule; name: PIdent): string =
   # meaning we produce inconsistent field names (see bug #5404).
   # Hence we do not check for ``m.g.config.cppDefines.contains(result)`` here
   # anymore:
-  if isKeyword(name):
+  if isNimOrCKeyword(name):
     result.add "_0"
 
 when false:
@@ -47,99 +38,77 @@ when false:
 proc mangleName(m: BModule; s: PSym): Rope =
   result = s.loc.r
   if result == nil:
-    result = s.name.s.mangle.rope
-    result.add(idOrSig(s, m.module.name.s.mangle, m.sigConflicts))
-    s.loc.r = result
+    result = m.idOrSig(s)
+    m.setLocationRope s, result
     writeMangledName(m.ndi, s, m.config)
 
-proc mangleParamName(m: BModule; s: PSym): Rope =
-  ## we cannot use 'sigConflicts' here since we have a BModule, not a BProc.
-  ## Fortunately C's scoping rules are sane enough so that that doesn't
-  ## cause any trouble.
+proc mangleLocalName(p: BProc | BModule; s: PSym): Rope =
+  ## mangle a symbol name local to a particular proc;
+  ## it's a local variable or a temporary we created
+  assert s.kind in skLocalVars + {skTemp, skParam}
+  template m(): BModule =
+    when p is BModule:
+      p
+    else:
+      p.module
   result = s.loc.r
   if result == nil:
-    var res = s.name.s.mangle
-    # Take into account if HCR is on because of the following scenario:
-    #   if a module gets imported and it has some more importc symbols in it,
-    # some param names might receive the "_0" suffix to distinguish from what
-    # is newly available. That might lead to changes in the C code in nimcache
-    # that contain only a parameter name change, but that is enough to mandate
-    # recompilation of that source file and thus a new shared object will be
-    # relinked. That may lead to a module getting reloaded which wasn't intended
-    # and that may be fatal when parts of the current active callstack when
-    # performCodeReload() was called are from the module being reloaded
-    # unintentionally - example (3 modules which import one another):
-    #   main => proxy => reloadable
-    # we call performCodeReload() in proxy to reload only changes in reloadable
-    # but there is a new import which introduces an importc symbol `socket`
-    # and a function called in main or proxy uses `socket` as a parameter name.
-    # That would lead to either needing to reload `proxy` or to overwrite the
-    # executable file for the main module, which is running (or both!) -> error.
-    if m.hcrOn or isKeyword(s.name) or m.g.config.cppDefines.contains(res):
-      res.add "_0"
-    result = res.rope
-    s.loc.r = result
-    writeMangledName(m.ndi, s, m.config)
+    result = p.idOrSig(s)
+    m.setLocationRope(s, result)
+    result = s.loc.r
+    if s.kind != skTemp:
+      writeMangledName(m.ndi, s, m.config)
 
-proc mangleLocalName(p: BProc; s: PSym): Rope =
-  assert s.kind in skLocalVars+{skTemp}
-  #assert sfGlobal notin s.flags
-  result = s.loc.r
-  if result == nil:
-    var key = s.name.s.mangle
-    shallow(key)
-    let counter = p.sigConflicts.getOrDefault(key)
-    result = key.rope
-    if s.kind == skTemp:
-      # speed up conflict search for temps (these are quite common):
-      if counter != 0: result.add "_" & rope(counter+1)
-    elif counter != 0 or isKeyword(s.name) or p.module.g.config.cppDefines.contains(key):
-      result.add "_" & rope(counter+1)
-    p.sigConflicts.inc(key)
-    s.loc.r = result
-    if s.kind != skTemp: writeMangledName(p.module.ndi, s, p.config)
+when true:
 
-proc scopeMangledParam(p: BProc; param: PSym) =
+  # IC hax
+  proc mangleParamName(p: BProc or BModule; s: PSym): Rope =
+    assert s.kind == skParam
+    result = mangleLocalName(p, s)
+
+else:
+  proc mangleParamName(p: BProc; s: PSym): Rope =
+    ## we cannot use 'sigConflicts' here since we have a BModule, not a BProc.
+    ## Fortunately C's scoping rules are sane enough so that that doesn't
+    ## cause any trouble.
+    result = s.loc.r
+    let
+      m = p.module
+    when not defined(release):
+      if result != nil:
+        assert $result == $p.idOrSig(s), "was " & $result & " now " & $p.idOrSig(s)
+    if result == nil:
+      result = p.idOrSig(s)
+      # Take into account if HCR is on because of the following scenario:
+      #   if a module gets imported and it has some more importc symbols in it,
+      # some param names might receive the "_0" suffix to distinguish from what
+      # is newly available. That might lead to changes in the C code in nimcache
+      # that contain only a parameter name change, but that is enough to mandate
+      # recompilation of that source file and thus a new shared object will be
+      # relinked. That may lead to a module getting reloaded which wasn't intended
+      # and that may be fatal when parts of the current active callstack when
+      # performCodeReload() was called are from the module being reloaded
+      # unintentionally - example (3 modules which import one another):
+      #   main => proxy => reloadable
+      # we call performCodeReload() in proxy to reload only changes in reloadable
+      # but there is a new import which introduces an importc symbol `socket`
+      # and a function called in main or proxy uses `socket` as a parameter name.
+      # That would lead to either needing to reload `proxy` or to overwrite the
+      # executable file for the main module, which is running (or both!) -> error.
+      # XXX: see comments in compiler/ic/backend inside sanitizeName()
+      m.setLocationRope s, result
+      writeMangledName(m.ndi, s, m.config)
+
+proc scopeMangledParam(p: BProc; s: PSym) =
+  template m(): BModule = p.module
   ## parameter generation only takes BModule, not a BProc, so we have to
   ## remember these parameter names are already in scope to be able to
   ## generate unique identifiers reliably (consider that ``var a = a`` is
   ## even an idiom in Nim).
-  var key = param.name.s.mangle
-  shallow(key)
-  p.sigConflicts.inc(key)
-
-const
-  irrelevantForBackend = {tyGenericBody, tyGenericInst, tyGenericInvocation,
-                          tyDistinct, tyRange, tyStatic, tyAlias, tySink,
-                          tyInferred, tyOwned}
-
-proc typeName(typ: PType): Rope =
-  let typ = typ.skipTypes(irrelevantForBackend)
-  result =
-    if typ.sym != nil and typ.kind in {tyObject, tyEnum}:
-      rope($typ.kind & '_' & typ.sym.name.s.mangle)
-    else:
-      rope($typ.kind)
-
-proc getTypeName(m: BModule; typ: PType; sig: SigHash): Rope =
-  var t = typ
-  while true:
-    if t.sym != nil and {sfImportc, sfExportc} * t.sym.flags != {}:
-      return t.sym.loc.r
-
-    if t.kind in irrelevantForBackend:
-      t = t.lastSon
-    else:
-      break
-  let typ = if typ.kind in {tyAlias, tySink, tyOwned}: typ.lastSon else: typ
-  if typ.loc.r == nil:
-    typ.loc.r = typ.typeName & $sig
-  else:
-    when defined(debugSigHashes):
-      # check consistency:
-      assert($typ.loc.r == $(typ.typeName & $sig))
-  result = typ.loc.r
-  if result == nil: internalError(m.config, "getTypeName: " & $typ.kind)
+  #let
+  #  r = p.idOrSig(param)
+  #module.setLocationRope(param, r)
+  m.setLocationRope s, mangleLocalName(m, s)
 
 proc mapSetType(conf: ConfigRef; typ: PType): TCTypeKind =
   case int(getSize(conf, typ))
@@ -210,6 +179,7 @@ proc isImportedCppType(t: PType): bool =
            (x.sym != nil and sfInfixCall in x.sym.flags)
 
 proc getTypeDescAux(m: BModule, origTyp: PType, check: var IntSet): Rope
+  {.tags: [TreeSafe, TreeWrite, TreeRead, RootEffect].}
 
 proc isObjLackingTypeField(typ: PType): bool {.inline.} =
   result = (typ.kind == tyObject) and ((tfFinal in typ.flags) and
@@ -281,15 +251,18 @@ proc ccgIntroducedPtr(conf: ConfigRef; s: PSym, retType: PType): bool =
   if s.position == 0 and retType != nil and retType.kind == tyLent:
     result = true
 
-proc fillResult(conf: ConfigRef; param: PNode) =
-  fillLoc(param.sym.loc, locParam, param, ~"Result",
-          OnStack)
+proc fillResult(m: BModule; conf: ConfigRef; param: PNode) =
+  m.fillLoc(param.sym, locParam, param, ~"Result", OnStack)
   let t = param.sym.typ
   if mapReturnType(conf, t) != ctArray and isInvalidReturnType(conf, t):
-    incl(param.sym.loc.flags, lfIndirect)
-    param.sym.loc.storage = OnUnknown
+    var
+      l = param.sym.loc
+    l.flags.incl lfIndirect
+    l.storage = OnUnknown
+    m.setLocation(param.sym, l)
 
-proc typeNameOrLiteral(m: BModule; t: PType, literal: string): Rope =
+proc typeNameOrLiteral(m: BModule; t: PType, literal: string): Rope
+  {.tags: [TreeRead].} =
   if t.sym != nil and sfImportc in t.sym.flags and t.sym.magic == mNone:
     useHeader(m, t.sym)
     result = t.sym.loc.r
@@ -333,17 +306,14 @@ proc getSimpleTypeDesc(m: BModule, typ: PType): Rope =
     if cacheGetType(m.typeCache, sig) == nil:
       m.typeCache[sig] = result
 
-proc pushType(m: BModule, typ: PType) =
-  for i in 0..high(m.typeStack):
-    # pointer equality is good enough here:
-    if m.typeStack[i] == typ: return
-  m.typeStack.add(typ)
-
-proc getTypePre(m: BModule, typ: PType; sig: SigHash): Rope =
-  if typ == nil: result = rope("void")
+proc getTypePre(m: BModule, typ: PType; sig: SigHash): Rope
+  {.tags: [TreeRead, RootEffect].} =
+  if typ == nil:
+    result = rope("void")
   else:
     result = getSimpleTypeDesc(m, typ)
-    if result == nil: result = cacheGetType(m.typeCache, sig)
+    if result == nil:
+      result = cacheGetType(m.typeCache, sig)
 
 proc structOrUnion(t: PType): Rope =
   let cachedUnion {.global.} = rope("union")
@@ -362,7 +332,8 @@ proc seqStar(m: BModule): string =
   if optSeqDestructors in m.config.globalOptions: result = ""
   else: result = "*"
 
-proc getTypeForward(m: BModule, typ: PType; sig: SigHash): Rope =
+proc getTypeForward(m: BModule, typ: PType; sig: SigHash): Rope
+  {.tags: [TreeSafe, TreeWrite, TreeRead, RootEffect].} =
   result = cacheGetType(m.forwTypeCache, sig)
   if result != nil: return
   result = getTypePre(m, typ, sig)
@@ -446,9 +417,14 @@ proc paramStorageLoc(param: PSym): TStorageLoc =
   else:
     result = OnUnknown
 
-proc genProcParams(m: BModule, t: PType, rettype, params: var Rope,
+proc genProcParams(p: BProc or BModule, t: PType, rettype, params: var Rope,
                    check: var IntSet, declareEnvironment=true;
                    weakDep=false) =
+  template m(): BModule =
+    when p is BProc:
+      {.error: "nah".}
+    else:
+      p
   params = nil
   if t[0] == nil or isInvalidReturnType(m.config, t[0]):
     rettype = ~"void"
@@ -459,13 +435,16 @@ proc genProcParams(m: BModule, t: PType, rettype, params: var Rope,
     var param = t.n[i].sym
     if isCompileTimeOnly(param.typ): continue
     if params != nil: params.add(~", ")
-    fillLoc(param.loc, locParam, t.n[i], mangleParamName(m, param),
-            param.paramStorageLoc)
+    m.fillLoc(param, locParam, t.n[i], mangleParamName(p, param),
+              param.paramStorageLoc)
     if ccgIntroducedPtr(m.config, param, t[0]):
       params.add(getTypeDescWeak(m, param.typ, check))
       params.add(~"*")
-      incl(param.loc.flags, lfIndirect)
-      param.loc.storage = OnUnknown
+      var
+        l = param.loc
+      l.flags.incl lfIndirect
+      l.storage = OnUnknown
+      m.setLocation(param, l)
     elif weakDep:
       params.add(getTypeDescWeak(m, param.typ, check))
     else:
@@ -478,7 +457,9 @@ proc genProcParams(m: BModule, t: PType, rettype, params: var Rope,
     var j = 0
     while arr.kind in {tyOpenArray, tyVarargs}:
       # this fixes the 'sort' bug:
-      if param.typ.kind in {tyVar, tyLent}: param.loc.storage = OnUnknown
+      if param.typ.kind in {tyVar, tyLent}:
+        m.mutateLocation param:
+          mloc.storage = OnUnknown
       # need to pass hidden parameter:
       params.addf(", NI $1Len_$2", [param.loc.r, j.rope])
       inc(j)
@@ -552,7 +533,7 @@ proc genRecordFieldsAux(m: BModule, n: PNode,
     if field.typ.kind == tyVoid: return
     #assert(field.ast == nil)
     let sname = mangleRecFieldName(m, field)
-    fillLoc(field.loc, locField, n, unionPrefix & sname, OnUnknown)
+    m.fillLoc(field, locField, n, unionPrefix & sname, OnUnknown)
     if field.alignment > 0:
       result.addf "NIM_ALIGN($1) ", [rope(field.alignment)]
     # for importcpp'ed objects, we only need to set field.loc, but don't
@@ -586,7 +567,8 @@ proc fillObjectFields*(m: BModule; typ: PType) =
 proc mangleDynLibProc(sym: PSym): Rope
 
 proc getRecordDesc(m: BModule, typ: PType, name: Rope,
-                   check: var IntSet): Rope =
+                   check: var IntSet): Rope
+  {.tags: [TreeRead, TreeSafe, TreeWrite, RootEffect].} =
   # declare the record:
   var hasField = false
 
@@ -677,9 +659,9 @@ proc resolveStarsInCppType(typ: PType, idx, stars: int): PType =
       result = if result.kind == tyGenericInst: result[1]
                else: result.elemType
 
-proc getTypeDescAux(m: BModule, origTyp: PType, check: var IntSet): Rope =
-  # returns only the type's name
-
+proc getTypeDescAux(m: BModule, origTyp: PType, check: var IntSet): Rope
+  {.tags: [TreeSafe, TreeRead, TreeWrite, RootEffect].} =
+  ## returns only the type's name
   var t = origTyp.skipTypes(irrelevantForBackend-{tyOwned})
   if containsOrIncl(check, t.id):
     if not (isImportedCppType(origTyp) or isImportedCppType(t)):
@@ -703,6 +685,7 @@ proc getTypeDescAux(m: BModule, origTyp: PType, check: var IntSet): Rope =
   of tyRef, tyPtr, tyVar, tyLent:
     var star = if t.kind == tyVar and tfVarIsPtr notin origTyp.flags and
                     compileToCpp(m): "&" else: "*"
+    # et == element type of "ptr T" is T, the last kid
     var et = origTyp.skipTypes(abstractInst).lastSon
     var etB = et.skipTypes(abstractInst)
     if mapType(m.config, t) == ctPtrToArray:
@@ -891,7 +874,7 @@ proc getTypeDescAux(m: BModule, origTyp: PType, check: var IntSet): Rope =
           discard # addAbiCheck(m, t, result) # already handled elsewhere
   of tySet:
     # Don't use the imported name as it may be scoped: 'Foo::SomeKind'
-    result = $t.kind & '_' & t.lastSon.typeName & $t.lastSon.hashType
+    result = getTypeName(m, t, sig)
     m.typeCache[sig] = result
     if not isImportedType(t):
       let s = int(getSize(m.config, t))
@@ -908,7 +891,8 @@ proc getTypeDescAux(m: BModule, origTyp: PType, check: var IntSet): Rope =
   # fixes bug #145:
   excl(check, t.id)
 
-proc getTypeDesc(m: BModule, typ: PType): Rope =
+proc getTypeDesc(m: BModule, typ: PType): Rope
+  {.tags: [TreeSafe, TreeRead, TreeWrite, RootEffect].} =
   var check = initIntSet()
   result = getTypeDescAux(m, typ, check)
 
@@ -918,7 +902,8 @@ type
     clHalfWithEnv,    ## fn(args, void* env) type with trailing 'void* env' parameter
     clFull            ## struct {fn(args, void* env), env}
 
-proc getClosureType(m: BModule, t: PType, kind: TClosureTypeKind): Rope =
+proc getClosureType(p: BProc, t: PType, kind: TClosureTypeKind): Rope =
+  template m(): BModule = p.module
   assert t.kind == tyProc
   var check = initIntSet()
   result = getTempName(m)
@@ -954,7 +939,12 @@ proc isReloadable(m: BModule, prc: PSym): bool =
 proc isNonReloadable(m: BModule, prc: PSym): bool =
   return m.hcrOn and sfNonReloadable in prc.flags
 
-proc genProcHeader(m: BModule, prc: PSym, asPtr: bool = false): Rope =
+proc genProcHeader(p: BProc or BModule, prc: PSym, asPtr: bool = false): Rope =
+  template m(): BModule =
+    when p is BProc:
+      {.error: "nah".}
+    else:
+      p
   var
     rettype, params: Rope
   # using static is needed for inline procs
@@ -968,7 +958,7 @@ proc genProcHeader(m: BModule, prc: PSym, asPtr: bool = false): Rope =
   elif sfImportc notin prc.flags:
     result.add "N_LIB_PRIVATE "
   var check = initIntSet()
-  fillLoc(prc.loc, locProc, prc.ast[namePos], mangleName(m, prc), OnUnknown)
+  m.fillLoc(prc, locProc, prc.ast[namePos], mangleName(m, prc), OnUnknown)
   genProcParams(m, prc.typ, rettype, params, check)
   # handle the 2 options for hotcodereloading codegen - function pointer
   # (instead of forward declaration) or header for function body with "_actual" postfix

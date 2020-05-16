@@ -788,7 +788,7 @@ type
     storage*: TStorageLoc
     flags*: TLocFlags         # location's flags
     lode*: PNode              # Node where the location came from; can be faked
-    r*: Rope                  # rope value of location (code generators)
+    roap: Rope                # rope value of location (code generators)
 
   # ---------------- end of backend information ------------------------------
 
@@ -872,7 +872,7 @@ type
                               # to the module's fileIdx
                               # for variables a slot index for the evaluator
     offset*: int              # offset of record field
-    loc*: TLoc
+    location: TLoc
     annex*: PLib              # additional fields (seldom used, so we use a
                               # reference to another object to save space)
     when hasFFI:
@@ -897,6 +897,8 @@ type
     attachedDispose,
     attachedDeepCopy
 
+  TAttachedOps* = array[TTypeAttachedOp, PSym] # destructors, etc.
+
   TType* {.acyclic.} = object of TIdObj # \
                               # types are identical iff they have the
                               # same id; there may be multiple copies of a type
@@ -917,18 +919,19 @@ type
     owner*: PSym              # the 'owner' of the type
     sym*: PSym                # types have the sym associated with them
                               # it is used for converting types to strings
-    attachedOps*: array[TTypeAttachedOp, PSym] # destructors, etc.
+    attachedOps*: TAttachedOps # destructors, etc.
     methods*: seq[(int,PSym)] # attached methods
     size*: BiggestInt         # the size of the type in bytes
                               # -1 means that the size is unkwown
     align*: int16             # the type's alignment requirements
     paddingAtEnd*: int16      #
     lockLevel*: TLockLevel    # lock level as required for deadlock checking
-    loc*: TLoc
+    location: TLoc
     typeInst*: PType          # for generic instantiations the tyGenericInst that led to this
                               # type.
     uniqueId*: int            # due to a design mistake, we need to keep the real ID here as it
                               # required by the --incremental:on mode.
+    icSealed*: bool
 
   TPair* = object
     key*, val*: RootRef
@@ -1045,7 +1048,6 @@ const
   defaultAlignment = -1
   defaultOffset = -1
 
-
 proc getnimblePkg*(a: PSym): PSym =
   result = a
   while result != nil:
@@ -1074,7 +1076,7 @@ proc isCallExpr*(n: PNode): bool =
 
 proc discardSons*(father: PNode)
 
-type Indexable = PNode | PType
+include astmut
 
 proc len*(n: Indexable): int {.inline.} =
   when defined(nimNoNilSeqs):
@@ -1093,18 +1095,6 @@ proc safeArrLen*(n: PNode): int {.inline.} =
   if n.kind in {nkStrLit..nkTripleStrLit}:result = n.strVal.len
   elif n.kind in {nkNone..nkFloat128Lit}: result = 0
   else: result = n.len
-
-proc add*(father, son: Indexable) =
-  assert son != nil
-  when not defined(nimNoNilSeqs):
-    if isNil(father.sons): father.sons = @[]
-  father.sons.add(son)
-
-template `[]`*(n: Indexable, i: int): Indexable = n.sons[i]
-template `[]=`*(n: Indexable, i: int; x: Indexable) = n.sons[i] = x
-
-template `[]`*(n: Indexable, i: BackwardsIndex): Indexable = n[n.len - i.int]
-template `[]=`*(n: Indexable, i: BackwardsIndex; x: Indexable) = n[n.len - i.int] = x
 
 when defined(useNodeIds):
   const nodeIdToDebug* = -1 # 2322968
@@ -1357,13 +1347,6 @@ proc newType*(kind: TTypeKind, owner: PSym): PType =
       echo "KNID ", kind
       writeStackTrace()
 
-proc mergeLoc(a: var TLoc, b: TLoc) =
-  if a.k == low(a.k): a.k = b.k
-  if a.storage == low(a.storage): a.storage = b.storage
-  a.flags = a.flags + b.flags
-  if a.lode == nil: a.lode = b.lode
-  if a.r == nil: a.r = b.r
-
 proc newSons*(father: Indexable, length: int) =
   when defined(nimNoNilSeqs):
     setLen(father.sons, length)
@@ -1387,7 +1370,8 @@ proc assignType*(dest, src: PType) =
     if dest.sym != nil:
       dest.sym.flags = dest.sym.flags + (src.sym.flags-{sfExported})
       if dest.sym.annex == nil: dest.sym.annex = src.sym.annex
-      mergeLoc(dest.sym.loc, src.sym.loc)
+      # IC: unsafe mutation permitted here
+      mergeLoc(dest.sym.location, src.sym.loc)
     else:
       dest.sym = src.sym
   newSons(dest, src.len)
@@ -1418,7 +1402,7 @@ proc copySym*(s: PSym): PSym =
     copyStrTable(result.tab, s.tab)
   result.options = s.options
   result.position = s.position
-  result.loc = s.loc
+  result.location = s.location
   result.annex = s.annex      # BUGFIX
   if result.kind in {skVar, skLet, skField}:
     result.guard = s.guard
@@ -1435,7 +1419,7 @@ proc createModuleAlias*(s: PSym, newIdent: PIdent, info: TLineInfo;
   system.shallowCopy(result.tab, s.tab)
   result.options = s.options
   result.position = s.position
-  result.loc = s.loc
+  result.location = s.location
   result.annex = s.annex
   # XXX once usedGenerics is used, ensure module aliases keep working!
   assert s.usedGenerics.len == 0
@@ -1584,7 +1568,8 @@ template transitionSymKindCommon*(k: TSymKind) =
   s[] = TSym(kind: k, id: obj.id, magic: obj.magic, typ: obj.typ, name: obj.name,
              info: obj.info, owner: obj.owner, flags: obj.flags, ast: obj.ast,
              options: obj.options, position: obj.position, offset: obj.offset,
-             loc: obj.loc, annex: obj.annex, constraint: obj.constraint)
+             location: obj.location, annex: obj.annex,
+             constraint: obj.constraint)
   when hasFFI:
     s.cname = obj.cname
   when defined(nimsuggest):
@@ -1641,7 +1626,7 @@ proc copyTreeWithoutNode*(src, skippedNode: PNode): PNode =
     result.sons = newSeqOfCap[PNode](src.len)
     for n in src.sons:
       if n != skippedNode:
-        result.sons.add copyTreeWithoutNode(n, skippedNode)
+        result.safeAdd copyTreeWithoutNode(n, skippedNode)
 
 proc hasSonWith*(n: PNode, kind: TNodeKind): bool =
   for i in 0..<n.len:
@@ -1890,7 +1875,7 @@ proc newProcType*(info: TLineInfo; owner: PSym): PType =
   # result.n[0] used to be `nkType`, but now it's `nkEffectList` because
   # the effects are now stored in there too ... this is a bit hacky, but as
   # usual we desperately try to save memory:
-  result.n.add newNodeI(nkEffectList, info)
+  result.n.safeAdd newNodeI(nkEffectList, info)
 
 proc addParam*(procType: PType; param: PSym) =
   param.position = procType.len-1
@@ -1934,3 +1919,8 @@ proc toHumanStr*(kind: TSymKind): string =
 proc toHumanStr*(kind: TTypeKind): string =
   ## strips leading `tk`
   result = toHumanStrImpl(kind, 2)
+
+proc `$`*(loc: TLoc): string =
+  result.add "loc[" & $loc.k & "/" & $loc.storage & ": "
+  result.add $loc.flags
+  result.add "`" & $loc.roap & "`"

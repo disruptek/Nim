@@ -9,7 +9,9 @@
 
 ## This module implements the 'implies' relation for guards.
 
-import ast, astalgo, msgs, magicsys, nimsets, trees, types, renderer, idents,
+import
+
+  ast, astalgo, msgs, magicsys, nimsets, trees, types, renderer, idents,
   saturate, modulegraphs, options, lineinfos, int128
 
 const
@@ -37,6 +39,8 @@ const
   someMax = {mMaxI}
   someMin = {mMinI}
   someBinaryOp = someAdd+someSub+someMul+someMax+someMin
+
+template add(father: PNode; son: PNode) = father.safeAdd son
 
 proc isValue(n: PNode): bool = n.kind in {nkCharLit..nkNilLit}
 proc isLocation(n: PNode): bool = not n.isValue

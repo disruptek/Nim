@@ -15,6 +15,8 @@ const
 import ast, astalgo, types, idents, magicsys, msgs, options, modulegraphs,
   lineinfos
 
+template add(n: PNode; p: PNode) = n.safeAdd p
+
 proc newDeref*(n: PNode): PNode {.inline.} =
   result = newNodeIT(nkHiddenDeref, n.info, n.typ[0])
   result.add n

@@ -93,7 +93,8 @@ proc genVarTuple(p: BProc, n: PNode) =
     var traverseProc: Rope
     if sfGlobal in v.flags:
       assignGlobalVar(p, vn, nil)
-      genObjectInit(p, cpsInit, v.typ, v.loc, constructObj)
+      p.module.mutateLocation v:
+        genObjectInit(p, cpsInit, v.typ, mloc, constructObj)
       traverseProc = getTraverseProc(p, v)
       if traverseProc != nil and not p.hcrOn:
         registerTraverseProc(p, v, traverseProc)
@@ -102,13 +103,19 @@ proc genVarTuple(p: BProc, n: PNode) =
       initLocalVar(p, v, immediateAsgn=isAssignedImmediately(p.config, n[^1]))
     initLoc(field, locExpr, vn, tup.storage)
     if t.kind == tyTuple:
-      field.r = "$1.Field$2" % [rdLoc(tup), rope(i)]
+      field.setRope "$1.Field$2" % [rdLoc(tup), rope(i)]
     else:
       if t.n[i].kind != nkSym: internalError(p.config, n.info, "genVarTuple")
-      field.r = "$1.$2" % [rdLoc(tup), mangleRecFieldName(p.module, t.n[i].sym)]
-    putLocIntoDest(p, v.loc, field)
-    if forHcr or isGlobalInBlock:
-      hcrGlobals.add((loc: v.loc, tp: if traverseProc == nil: ~"NULL" else: traverseProc))
+      field.setRope "$1.$2" % [rdLoc(tup), mangleRecFieldName(p.module, t.n[i].sym)]
+    p.module.mutateLocation v:
+      putLocIntoDest(p, mloc, field)
+      if forHcr or isGlobalInBlock:
+        let tp =
+          if traverseProc == nil:
+            ~"NULL"
+          else:
+            traverseProc
+        hcrGlobals.add (loc: mloc, tp: tp)
 
   if forHcr:
     # end the block where the tuple gets initialized
@@ -257,11 +264,11 @@ proc genBreakState(p: BProc, n: PNode, d: var TLoc) =
 
   if n[0].kind == nkClosure:
     initLocExpr(p, n[0][1], a)
-    d.r = "(((NI*) $1)[1] < 0)" % [rdLoc(a)]
+    d.setRope "(((NI*) $1)[1] < 0)" % [rdLoc(a)]
   else:
     initLocExpr(p, n[0], a)
     # the environment is guaranteed to contain the 'state' field at offset 1:
-    d.r = "((((NI*) $1.ClE_0)[1]) < 0)" % [rdLoc(a)]
+    d.setRope "((((NI*) $1.ClE_0)[1]) < 0)" % [rdLoc(a)]
 
 proc genGotoVar(p: BProc; value: PNode) =
   if value.kind notin {nkCharLit..nkUInt64Lit}:
@@ -373,7 +380,8 @@ proc genSingleVar(p: BProc, v: PSym; vn, value: PNode) =
     startBlock(targetProc)
   if value.kind != nkEmpty and valueAsRope == nil:
     genLineDir(targetProc, vn)
-    loadInto(targetProc, vn, value, v.loc)
+    p.module.mutateLocation v:
+      loadInto(targetProc, vn, value, mloc)
   if forHcr:
     endBlock(targetProc)
 
@@ -622,7 +630,8 @@ proc genBlock(p: BProc, n: PNode, d: var TLoc) =
       # named block?
       assert(n[0].kind == nkSym)
       var sym = n[0].sym
-      sym.loc.k = locOther
+      p.module.mutateLocation sym:
+        mloc.k = locOther
       sym.position = p.breakIdx+1
     expr(p, n[1], d)
     endBlock(p)
@@ -1042,7 +1051,7 @@ proc genTryCpp(p: BProc, t: PNode, d: var TLoc) =
           startBlock(p, "if ($1) {$n", [orExpr])
           hasIf = true
         if exvar != nil:
-          fillLoc(exvar.sym.loc, locTemp, exvar, mangleLocalName(p, exvar.sym), OnStack)
+          p.module.fillLoc(exvar.sym, locTemp, exvar, mangleLocalName(p, exvar.sym), OnStack)
           linefmt(p, cpsStmts, "$1 $2 = T$3_;$n", [getTypeDesc(p.module, exvar.sym.typ),
             rdLoc(exvar.sym.loc), rope(etmp+1)])
         # we handled the error:
@@ -1083,7 +1092,7 @@ proc genTryCpp(p: BProc, t: PNode, d: var TLoc) =
             typeNode = t[i][j][1]
             if isImportedException(typeNode.typ, p.config):
               let exvar = t[i][j][2] # ex1 in `except ExceptType as ex1:`
-              fillLoc(exvar.sym.loc, locTemp, exvar, mangleLocalName(p, exvar.sym), OnStack)
+              p.module.fillLoc(exvar.sym, locTemp, exvar, mangleLocalName(p, exvar.sym), OnStack)
               startBlock(p, "catch ($1& $2) {$n", getTypeDesc(p.module, typeNode.typ), rdLoc(exvar.sym.loc))
               genExceptBranchBody(t[i][^1])  # exception handler body will duplicated for every type
               endBlock(p)
@@ -1162,7 +1171,7 @@ proc genTryCppOld(p: BProc, t: PNode, d: var TLoc) =
       for j in 0..<t[i].len-1:
         if t[i][j].isInfixAs():
           let exvar = t[i][j][2] # ex1 in `except ExceptType as ex1:`
-          fillLoc(exvar.sym.loc, locTemp, exvar, mangleLocalName(p, exvar.sym), OnUnknown)
+          p.module.fillLoc(exvar.sym, locTemp, exvar, mangleLocalName(p, exvar.sym), OnUnknown)
           startBlock(p, "catch ($1& $2) {$n", getTypeDesc(p.module, t[i][j][1].typ), rdLoc(exvar.sym.loc))
         else:
           startBlock(p, "catch ($1&) {$n", getTypeDesc(p.module, t[i][j].typ))
@@ -1419,7 +1428,8 @@ proc genAsmOrEmitStmt(p: BProc, t: PNode, isAsmStmt=false): Rope =
           # if no name has already been given,
           # it doesn't matter much:
           r = mangleName(p.module, sym)
-          sym.loc.r = r       # but be consequent!
+          p.module.mutateLocation sym:
+            mloc.setRope r       # but be consistent!
         res.add($r)
     of nkTypeOfExpr:
       res.add($getTypeDesc(p.module, it.typ))

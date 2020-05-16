@@ -1,8 +1,8 @@
 
 import
-  intsets, ast, idents, algorithm, renderer, os, strutils,
-  msgs, modulegraphs, syntaxes, options, modulepaths,
-  lineinfos
+
+  intsets, ast, idents, algorithm, renderer, os, strutils, msgs,
+  modulegraphs, syntaxes, options, modulepaths, lineinfos, safeadd
 
 type
   DepN = ref object

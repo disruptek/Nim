@@ -32,63 +32,59 @@ proc detectSeqVersion(m: BModule): int =
 
 # ----- Version 1: GC'ed strings and seqs --------------------------------
 
-proc genStringLiteralDataOnlyV1(m: BModule, s: string): Rope =
+proc genStringLiteralDataOnlyV1(m: BModule, s: string; name: Rope) =
   discard cgsym(m, "TGenericSeq")
-  result = getTempName(m)
   m.s[cfsData].addf("STRING_LITERAL($1, $2, $3);$n",
-       [result, makeCString(s), rope(s.len)])
+                    [name, makeCString(s), rope(s.len)])
+
+proc genStringLiteralDataOnlyV1(m: BModule, s: string): Rope =
+  result = getTempName(m)
+  genStringLiteralDataOnlyV1(m, s, result)
 
 proc genStringLiteralV1(m: BModule; n: PNode): Rope =
   if s.isNil:
     result = ropecg(m, "((#NimStringDesc*) NIM_NIL)", [])
   else:
-    let id = nodeTableTestOrSet(m.dataCache, n, m.labels)
-    if id == m.labels:
-      # string literal not found in the cache:
-      result = ropecg(m, "((#NimStringDesc*) &$1)",
-                      [genStringLiteralDataOnlyV1(m, n.strVal)])
-    else:
-      result = ropecg(m, "((#NimStringDesc*) &$1$2)",
-                      [m.tmpBase, id])
+    var name: Rope
+    if m.getTempName(n, name):
+      genStringLiteralDataOnlyV1(m, n.strVal, name)
+    result = ropecg(m, "((#NimStringDesc*) &$1)", [name])
 
 # ------ Version 2: destructor based strings and seqs -----------------------
 
 proc genStringLiteralDataOnlyV2(m: BModule, s: string; result: Rope; isConst: bool) =
+  let constr = if isConst: rope"const" else: rope""
   m.s[cfsData].addf("static $4 struct {$n" &
        "  NI cap; NIM_CHAR data[$2+1];$n" &
        "} $1 = { $2 | NIM_STRLIT_FLAG, $3 };$n",
-       [result, rope(s.len), makeCString(s),
-       rope(if isConst: "const" else: "")])
+       [result, rope(s.len), makeCString(s), constr])
 
 proc genStringLiteralV2(m: BModule; n: PNode; isConst: bool): Rope =
-  let id = nodeTableTestOrSet(m.dataCache, n, m.labels)
-  if id == m.labels:
-    let pureLit = getTempName(m)
-    genStringLiteralDataOnlyV2(m, n.strVal, pureLit, isConst)
+  const
+    codegenf = "static $4 NimStringV2 $1 = {$2, (NimStrPayload*)&$3};$n"
+  let constr = if isConst: rope"const" else: rope""
+  var name: Rope
+
+  # this is a little subtle due to ..DataOnly.. side-effects
+
+  if m.getTempName(n, name):
+    genStringLiteralDataOnlyV2(m, n.strVal, name, isConst)
     result = getTempName(m)
     discard cgsym(m, "NimStrPayload")
     discard cgsym(m, "NimStringV2")
-    # string literal not found in the cache:
-    m.s[cfsData].addf("static $4 NimStringV2 $1 = {$2, (NimStrPayload*)&$3};$n",
-          [result, rope(n.strVal.len), pureLit, rope(if isConst: "const" else: "")])
   else:
     result = getTempName(m)
-    m.s[cfsData].addf("static $4 NimStringV2 $1 = {$2, (NimStrPayload*)&$3};$n",
-          [result, rope(n.strVal.len), m.tmpBase & rope(id),
-          rope(if isConst: "const" else: "")])
+  m.s[cfsData].addf(codegenf,
+                    [result, rope(n.strVal.len), name, constr])
 
 proc genStringLiteralV2Const(m: BModule; n: PNode; isConst: bool): Rope =
-  let id = nodeTableTestOrSet(m.dataCache, n, m.labels)
-  var pureLit: Rope
-  if id == m.labels:
-    pureLit = getTempName(m)
+  var name: Rope
+  if m.getTempName(n, name):
     discard cgsym(m, "NimStrPayload")
     discard cgsym(m, "NimStringV2")
     # string literal not found in the cache:
-    genStringLiteralDataOnlyV2(m, n.strVal, pureLit, isConst)
-  else:
-    pureLit = m.tmpBase & rope(id)
-  result = "{$1, (NimStrPayload*)&$2}" % [rope(n.strVal.len), pureLit]
+    genStringLiteralDataOnlyV2(m, n.strVal, name, isConst)
+  result = "{$1, (NimStrPayload*)&$2}" % [rope(n.strVal.len), name]
 
 # ------ Version selector ---------------------------------------------------
 

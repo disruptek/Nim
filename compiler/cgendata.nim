@@ -10,8 +10,24 @@
 ## This module contains the data structures for the C code generation phase.
 
 import
-  ast, ropes, options, intsets,
-  tables, ndi, lineinfos, pathutils, modulegraphs, sets
+
+  ast, ropes, options, intsets, sighashes, astalgo, tables, ndi,
+  lineinfos, pathutils, modulegraphs, wordrecg, idents
+
+import
+
+  std / [ tables, sets ]
+
+template witness*(body: untyped): untyped {.dirty.} =
+  ## perform a dangerous operation on an IC context; ensure it's unsealed!
+  assert not m.isSealed
+  if not m.isSealed:
+    body
+
+template add*(father, son: PNode or PType): untyped {.dirty.} =
+  ## perform a dangerous operation on an IC context; ensure it's unsealed!
+  witness:
+    father.safeAdd son
 
 type
   TLabel* = Rope              # for the C generator a label is just a rope
@@ -72,6 +88,8 @@ type
     nimErrorFlagAccessed,
     nimErrorFlagDeclared
 
+  ConflictsTable* = TableRef[string, int]
+
   TCProc = object             # represents C proc that is currently generated
     prc*: PSym                # the Nim proc that this C proc belongs to
     flags*: set[TCProcFlag]
@@ -96,10 +114,9 @@ type
                               # requires 'T x = T()' to become 'T x; x = T()'
                               # (yes, C++ is weird like that)
     withinTryWithExcept*: int # required for goto based exception handling
-    sigConflicts*: CountTable[string]
+    sigConflicts*: ConflictsTable
 
-  TTypeSeq* = seq[PType]
-  TypeCache* = Table[SigHash, Rope]
+  TypeCache* = TableRef[SigHash, Rope]
   TypeCacheWithOwner* = Table[SigHash, tuple[str: Rope, owner: PSym]]
 
   CodegenFlag* = enum
@@ -111,14 +128,13 @@ type
     includesStringh,    # C source file already includes ``<string.h>``
     objHasKidsValid     # whether we can rely on tfObjHasKids
 
-
   BModuleList* = ref object of RootObj
     mainModProcs*, mainModInit*, otherModsInit*, mainDatInit*: Rope
     mapping*: Rope             # the generated mapping file (if requested)
     modules*: seq[BModule]     # list of all compiled modules
     modulesClosed*: seq[BModule] # list of the same compiled modules, but in the order they were closed
     forwardedProcs*: seq[PSym] # proc:s that did not yet have a body
-    generatedHeader*: BModule
+    generatedHeader*: BModule  # dark arts
     typeInfoMarker*: TypeCacheWithOwner
     config*: ConfigRef
     graph*: ModuleGraph
@@ -137,12 +153,12 @@ type
 
   TCGen = object of PPassContext # represents a C source file
     s*: TCFileSections        # sections of the C file
-    flags*: set[CodegenFlag]
-    module*: PSym
-    filename*: AbsoluteFile
+    flags*: set[CodegenFlag]  # i think this is for the semaphore impl
+    module*: PSym             # the module from whence we came
+    filename*: AbsoluteFile   # no idea what this could be
     cfilename*: AbsoluteFile  # filename of the module (including path,
                               # without extension)
-    tmpBase*: Rope            # base for temp identifier generation
+    tmpBase*: string          # base for temp identifier generation
     typeCache*: TypeCache     # cache the generated types
     typeABICache*: HashSet[SigHash] # cache for ABI checks; reusing typeCache
                               # would be ideal but for some reason enums
@@ -158,19 +174,79 @@ type
     hcrCreateTypeInfosProc*: Rope # type info globals are in here when HCR=on
     inHcrInitGuard*: bool     # We are currently within a HCR reloading guard.
     typeStack*: TTypeSeq      # used for type generation
-    dataCache*: TNodeTable
+    dataCache*: TNodeTable    # this is where we cache literals in the module
     typeNodes*, nimTypes*: int # used for type info generation
     typeNodesName*, nimTypesName*: Rope # used for type info generation
     labels*: Natural          # for generating unique module-scope names
     extensionLoaders*: array['0'..'9', Rope] # special procs for the
                                              # OpenGL wrapper
-    injectStmt*: Rope
-    sigConflicts*: CountTable[SigHash]
-    g*: BModuleList
-    ndi*: NdiFile
+    injectStmt*: Rope         # i think this has something to do with iv drugs
+    sigConflicts*: ConflictsTable
+    g*: BModuleList           # the complete module graph
+    ndi*: NdiFile             # "nim debug info" files
+
+
+    # move all this transform stuff into ic backend?
+    transforms*: TransformTable
+
+  TransformKind* = enum
+    Unknown
+    HeaderFile
+    ProtoSet
+    ThingSet
+    FlagSet
+    TypeStack
+    Injection
+    GraphRope
+    InitProc
+    PreInit
+    Labels
+    SetLoc
+    LiteralData
+
+  TransformTable* = OrderedTable[SigHash, Transform]
+
+  Transform* = object
+    module*: BModule
+    case kind*: TransformKind
+    of Unknown:
+      discard
+    of FlagSet:
+      flags*: set[CodegenFlag]
+    of ProtoSet, ThingSet:
+      diff*: IntSet
+    of HeaderFile:
+      filenames*: seq[string]
+    of TypeStack:
+      stack*: TTypeSeq
+    of Injection:
+      rope*: Rope
+    of GraphRope:
+      field*: string
+      grope*: Rope
+    of InitProc, PreInit:
+      prc*: PSym
+    of Labels:
+      labels*: int
+    of SetLoc:
+      nkind*: TNodeKind
+      id*: int
+      loc*: TLoc
+    of LiteralData:
+      node*: PNode
+      val*: int
 
 template config*(m: BModule): ConfigRef = m.g.config
 template config*(p: BProc): ConfigRef = p.module.g.config
+
+proc isNimOrCKeyword*(w: PIdent): bool =
+  # Nim and C++ share some keywords
+  # it's more efficient to test the whole Nim keywords range
+  case w.id
+  of ccgKeywordsLow..ccgKeywordsHigh,
+     nimKeywordsLow..nimKeywordsHigh,
+     ord(wInline): return true
+  else: return false
 
 proc includeHeader*(this: BModule; header: string) =
   if not this.headerFiles.contains header:
@@ -188,12 +264,15 @@ proc newProc*(prc: PSym, module: BModule): BProc =
   new(result)
   result.prc = prc
   result.module = module
-  if prc != nil: result.options = prc.options
-  else: result.options = module.config.options
+  result.sigConflicts = newTable[string, int]()
+  result.options =
+    if prc == nil:
+      module.config.options
+    else:
+      prc.options
   newSeq(result.blocks, 1)
   result.nestedTryStmts = @[]
   result.finallySafePoints = @[]
-  result.sigConflicts = initCountTable[string]()
 
 proc newModuleList*(g: ModuleGraph): BModuleList =
   BModuleList(typeInfoMarker: initTable[SigHash, tuple[str: Rope, owner: PSym]](),
@@ -203,3 +282,18 @@ iterator cgenModules*(g: BModuleList): BModule =
   for m in g.modulesClosed:
     # iterate modules in the order they were closed
     yield m
+
+proc pushType*(m: BModule, typ: PType) =
+  for i in 0..high(m.typeStack):
+    # pointer equality is good enough here:
+    if m.typeStack[i] == typ: return
+  m.typeStack.add(typ)
+
+proc newPreInitProc*(m: BModule): BProc =
+  result = newProc(nil, m)
+  # little hack so that unique temporaries are generated:
+  result.labels = 100_000
+
+proc initProcOptions*(m: BModule): TOptions =
+  let opts = m.config.options
+  if sfSystemModule in m.module.flags: opts-{optStackTrace} else: opts

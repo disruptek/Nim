@@ -167,6 +167,7 @@ when nimIncremental:
         id integer primary key,
         position integer not null,
         module integer not null,
+        signature text,
         data blob not null,
         foreign key (module) references module(id)
       );
@@ -185,7 +186,36 @@ when nimIncremental:
     db.exec sql"create index StaticsByModuleIdx on toplevelstmts(module);"
     db.exec sql"insert into controlblock(idgen) values (0)"
 
+    db.exec(sql"""
+      create table if not exists snippets (
+        id integer primary key,
+        signature text not null,
+        section int not null,
+        code text not null,
+        module integer not null,
+        foreign key (module) references module(id)
+      );
+    """)
 
+    db.exec(sql"""
+      create table if not exists transforms (
+        id integer primary key,
+        signature text not null,
+        kind char(20) not null,
+        data text not null,
+        module integer,
+        foreign key (module) references module(id)
+      );
+    """)
+
+    db.exec(sql"""
+      create table if not exists conflicts (
+        id integer primary key,
+        nimid int not null,
+        name text not null,
+        signature text not null
+      );
+    """)
 else:
   type
     IncrementalCtx* = object

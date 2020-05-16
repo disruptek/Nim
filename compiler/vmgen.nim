@@ -28,8 +28,9 @@
 # this copy depends on the involved types.
 
 import
-  strutils, ast, types, msgs, renderer, vmdef,
-  intsets, magicsys, options, lowerings, lineinfos, transf
+
+  strutils, ast, types, msgs, renderer, vmdef, intsets, magicsys, options,
+  lowerings, lineinfos, transf
 
 const
   debugEchoCode* = defined(nimVMDebug)

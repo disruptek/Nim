@@ -11,7 +11,8 @@
 ## macro support.
 
 import
-  ast, types, semdata, sigmatch, idents, aliases, parampatterns, trees
+
+  ast, types, semdata, sigmatch, idents, aliases, parampatterns, trees, ic
 
 type
   TPatternContext = object
@@ -22,6 +23,16 @@ type
     subMatch: bool       # subnode matches are special
     mappingIsFull: bool
   PPatternContext = var TPatternContext
+
+template isSealed(a: PPatternContext): bool = isSealed(a.c)
+template witness(body: untyped): untyped {.dirty.} =
+  ## perform a dangerous operation on an IC context; ensure it's unsealed!
+  assert not isSealed(c)
+  if not isSealed(c):
+    body
+template witness(c: PPatternContext; body: untyped): untyped {.dirty.} =
+  witness:
+    body
 
 proc getLazy(c: PPatternContext, sym: PSym): PNode =
   if c.mappingIsFull:
@@ -238,7 +249,7 @@ proc aliasAnalysisRequested(params: PNode): bool =
       let param = params[i].sym
       if whichAlias(param) != aqNone: return true
 
-proc addToArgList(result, n: PNode) =
+proc addToArgList(c: PContext; result, n: PNode) =
   if n.typ != nil and n.typ.kind != tyTyped:
     if n.kind != nkArgList: result.add(n)
     else:
@@ -267,7 +278,7 @@ proc applyRule*(c: PContext, s: PSym, n: PNode): PNode =
     # couldn't bind parameter:
     if isNil(x): return nil
     result.add(x)
-    if requiresAA: addToArgList(args, x)
+    if requiresAA: addToArgList(c, args, x)
   # perform alias analysis here:
   if requiresAA:
     for i in 1..<params.len:

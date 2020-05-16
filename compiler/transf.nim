@@ -19,10 +19,10 @@
 # * transforms 'defer' into a 'try finally' statement
 
 import
-  options, ast, astalgo, trees, msgs,
-  idents, renderer, types, semfold, magicsys, cgmeth,
-  lowerings, liftlocals,
-  modulegraphs, lineinfos
+
+  options, ast, astalgo, trees, msgs, idents, renderer, types,
+  semfold, magicsys, cgmeth, lowerings, liftlocals, modulegraphs,
+  lineinfos, safeadd
 
 proc transformBody*(g: ModuleGraph, prc: PSym, cache: bool): PNode
 

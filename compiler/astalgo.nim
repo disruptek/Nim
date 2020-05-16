@@ -12,8 +12,9 @@
 # the data structures here are used in various places of the compiler.
 
 import
-  ast, hashes, intsets, strutils, options, lineinfos, ropes, idents, rodutils,
-  msgs
+
+  ast, hashes, intsets, strutils, options, lineinfos, ropes, idents,
+  rodutils, msgs
 
 proc hashNode*(p: RootRef): Hash
 proc treeToYaml*(conf: ConfigRef; n: PNode, indent: int = 0, maxRecDepth: int = - 1): Rope
@@ -178,9 +179,32 @@ proc lookupInRecord(n: PNode, field: PIdent): PSym =
   else: return nil
 
 proc getModule*(s: PSym): PSym =
+  ## get the source module for a symbol node
   result = s
-  assert((result.kind == skModule) or (result.owner != result))
-  while result != nil and result.kind != skModule: result = result.owner
+  while result != nil and result.kind != skModule:
+    assert result != result.owner
+    result = result.owner
+
+proc getModule*(t: PType): PSym {.deprecated: "nonsensical?".} =
+  ## get the source module for a type node
+  if t != nil:
+    # if we have a symbol, we'll use that
+    if t.sym != nil:
+      result = getModule(t.sym)
+    # otherwise, use the type's owner
+    else:
+      result = getModule(t.owner)
+    assert result != nil, "could not find module for type"
+
+proc getModule*(n: PNode): PSym {.deprecated: "nonsensical".} =
+  if n != nil:
+    result = case n.kind
+    of nkSym:
+      getModule(n.sym)
+    of nkType:
+      getModule(n.typ)
+    else:
+      getModule(n.typ)
 
 proc fromSystem*(op: PSym): bool {.inline.} = sfSystemModule in getModule(op).flags
 proc getSymFromList*(list: PNode, ident: PIdent, start: int = 0): PSym =

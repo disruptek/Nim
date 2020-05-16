@@ -36,7 +36,7 @@ proc checkForSink*(config: ConfigRef; owner: PSym; arg: PNode) =
         sinkType.size = argType.size
         sinkType.align = argType.align
         sinkType.paddingAtEnd = argType.paddingAtEnd
-        sinkType.add argType
+        sinkType.safeAdd argType
 
         arg.sym.typ = sinkType
         owner.typ[arg.sym.position+1] = sinkType

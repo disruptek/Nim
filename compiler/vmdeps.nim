@@ -7,8 +7,15 @@
 #    distribution, for details about the copyright.
 #
 
-import ast, types, msgs, os, options, idents, lineinfos
+import
+
+  ast, types, msgs, os, options, idents, lineinfos
+
 from pathutils import AbsoluteFile
+
+proc add(father, son: PNode) =
+  ## perform a dangerous operation on an IC context; assume it's unsealed!
+  father.safeAdd son
 
 proc opSlurp*(file: string, info: TLineInfo, module: PSym; conf: ConfigRef): string =
   try:

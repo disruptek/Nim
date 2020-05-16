@@ -10,13 +10,14 @@
 # This module implements the semantic checking pass.
 
 import
-  ast, strutils, options, astalgo, trees,
-  wordrecg, ropes, msgs, idents, renderer, types, platform, math,
-  magicsys, nversion, nimsets, semfold, modulepaths, importer,
-  procfind, lookups, pragmas, passes, semdata, semtypinst, sigmatch,
-  intsets, transf, vmdef, vm, idgen, aliases, cgmeth, lambdalifting,
-  evaltempl, patterns, parampatterns, sempass2, linter, semmacrosanity,
-  lowerings, plugins/active, rod, lineinfos, strtabs, int128
+
+  ast, strutils, options, astalgo, trees, wordrecg, ropes, msgs, idents,
+  renderer, types, platform, math, magicsys, nversion, nimsets, semfold,
+  modulepaths, importer, procfind, lookups, pragmas, passes, semdata,
+  semtypinst, sigmatch, intsets, transf, vmdef, vm, idgen, aliases,
+  cgmeth, lambdalifting, evaltempl, patterns, parampatterns, sempass2,
+  linter, semmacrosanity, lowerings, plugins/active, lineinfos, strtabs,
+  int128, ic
 
 from modulegraphs import ModuleGraph, PPassContext, onUse, onDef, onDefResolveForward
 
@@ -599,25 +600,31 @@ proc recoverContext(c: PContext) =
 
 proc myProcess(context: PPassContext, n: PNode): PNode {.nosinks.} =
   var c = PContext(context)
-  # no need for an expensive 'try' if we stop after the first error anyway:
-  if c.config.errorMax <= 1:
-    result = semStmtAndGenerateGenerics(c, n)
-  else:
-    let oldContextLen = msgs.getInfoContextLen(c.config)
-    let oldInGenericInst = c.inGenericInst
-    try:
+  block:
+    # no need for an expensive 'try' if we stop after the first error anyway:
+    if c.config.errorMax <= 1:
       result = semStmtAndGenerateGenerics(c, n)
-    except ERecoverableError, ESuggestDone:
-      recoverContext(c)
-      c.inGenericInst = oldInGenericInst
-      msgs.setInfoContextLen(c.config, oldContextLen)
-      if getCurrentException() of ESuggestDone:
-        c.suggestionsMade = true
-        result = nil
-      else:
-        result = newNodeI(nkEmpty, n.info)
-      #if c.config.cmd == cmdIdeTools: findSuggest(c, n)
-  rod.storeNode(c.graph, c.module, result)
+    else:
+      let oldContextLen = msgs.getInfoContextLen(c.config)
+      let oldInGenericInst = c.inGenericInst
+      try:
+        result = semStmtAndGenerateGenerics(c, n)
+      except ERecoverableError, ESuggestDone:
+        recoverContext(c)
+        c.inGenericInst = oldInGenericInst
+        msgs.setInfoContextLen(c.config, oldContextLen)
+        if getCurrentException() of ESuggestDone:
+          c.suggestionsMade = true
+          result = nil
+        else:
+          result = newNodeI(nkEmpty, n.info)
+        #if c.config.cmd == cmdIdeTools: findSuggest(c, n)
+
+        break # skip ic
+
+    # IC: incremental compilation surface
+    if result != nil:
+      c.addIcCache result
 
 proc reportUnusedModules(c: PContext) =
   for i in 0..high(c.unusedImports):
@@ -636,10 +643,11 @@ proc myClose(graph: ModuleGraph; context: PPassContext, n: PNode): PNode =
     internalError(c.config, n.info, "n is not nil") #result := n;
   addCodeForGenerics(c, result)
   if c.module.ast != nil:
-    result.add(c.module.ast)
+    result.add c.module.ast
   popOwner(c)
   popProcCon(c)
-  storeRemaining(c.graph, c.module)
+  c.addIcCache result
+  c.seal
 
 const semPass* = makePass(myOpen, myProcess, myClose,
                           isFrontend = true)

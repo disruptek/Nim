@@ -122,7 +122,8 @@ proc genTraverseProcSeq(c: TTraversalClosure, accessor: Rope, typ: PType) =
   getTemp(p, getSysType(c.p.module.g.graph, unknownLineInfo, tyInt), i)
   let oldCode = p.s(cpsStmts)
   var a: TLoc
-  a.r = accessor
+  # i think it's safe...  seems like we're just using `a` TLoc temporarily
+  a.setRopeSecret accessor
 
   lineF(p, cpsStmts, "for ($1 = 0; $1 < $2; $1++) {$n",
       [i.r, lenExpr(c.p, a)])

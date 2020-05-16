@@ -14,7 +14,6 @@
 # be seen as a refinement of the grammar, as it specifies how the AST is built
 # from the grammar and how comments belong to the AST.
 
-
 # In fact the grammar is generated from this file:
 when isMainModule:
   # Leave a note in grammar.txt that it is generated:
@@ -30,6 +29,7 @@ when isMainModule:
   checkGrammarFile()
 
 import
+
   llstream, lexer, idents, strutils, ast, msgs, options, lineinfos,
   pathutils
 
@@ -55,6 +55,10 @@ type
 
   TPrimaryMode = enum
     pmNormal, pmTypeDesc, pmTypeDef, pmSkipSuffix
+
+# the parser is allowed to mutate the ast unconditionally
+template add(n: PNode; p: PNode) = n.safeAdd p
+template `[]=`(n: PNode; i: typed; p: PNode) = n[i] = p
 
 proc parseAll*(p: var TParser): PNode
 proc closeParser*(p: var TParser)

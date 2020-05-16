@@ -24,7 +24,7 @@
 import
   intsets, ast, astalgo, msgs, renderer, magicsys, types, idents,
   strutils, options, dfa, lowerings, tables, modulegraphs, msgs,
-  lineinfos, parampatterns, sighashes, liftdestructors
+  lineinfos, parampatterns, sighashes, liftdestructors, safeadd
 
 from trees import exprStructuralEquivalent, getRoot
 from algorithm import reverse

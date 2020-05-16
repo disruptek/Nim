@@ -9,7 +9,7 @@
 
 ## Plugin to transform an inline iterator into a data structure.
 
-import ".." / [ast, lookups, semdata, lambdalifting, msgs]
+import ".." / [ast, lookups, semdata, lambdalifting, msgs, ic]
 
 proc iterToProcImpl*(c: PContext, n: PNode): PNode =
   result = newNodeI(nkStmtList, n.info)

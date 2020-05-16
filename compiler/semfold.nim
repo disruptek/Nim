@@ -124,16 +124,16 @@ proc makeRange(typ: PType, first, last: BiggestInt; g: ModuleGraph): PType =
     result = typ
   else:
     var n = newNode(nkRange)
-    n.add lowerNode
-    n.add newIntNode(nkIntLit, maxA)
+    n.safeAdd lowerNode
+    n.safeAdd newIntNode(nkIntLit, maxA)
     result = newType(tyRange, typ.owner)
     result.n = n
     addSonSkipIntLit(result, skipTypes(typ, {tyRange}))
 
 proc makeRangeF(typ: PType, first, last: BiggestFloat; g: ModuleGraph): PType =
   var n = newNode(nkRange)
-  n.add newFloatNode(nkFloatLit, min(first.float, last.float))
-  n.add newFloatNode(nkFloatLit, max(first.float, last.float))
+  n.safeAdd newFloatNode(nkFloatLit, min(first.float, last.float))
+  n.safeAdd newFloatNode(nkFloatLit, max(first.float, last.float))
   result = newType(tyRange, typ.owner)
   result.n = n
   addSonSkipIntLit(result, skipTypes(typ, {tyRange}))
@@ -659,7 +659,7 @@ proc getConstExpr(m: PSym, n: PNode; g: ModuleGraph): PNode =
     for i, son in n.pairs:
       var a = getConstExpr(m, son, g)
       if a == nil: return nil
-      result.add a
+      result.safeAdd a
     incl(result.flags, nfAllConst)
   of nkRange:
     var a = getConstExpr(m, n[0], g)
@@ -667,8 +667,8 @@ proc getConstExpr(m: PSym, n: PNode; g: ModuleGraph): PNode =
     var b = getConstExpr(m, n[1], g)
     if b == nil: return
     result = copyNode(n)
-    result.add a
-    result.add b
+    result.safeAdd a
+    result.safeAdd b
   #of nkObjConstr:
   #  result = copyTree(n)
   #  for i in 1..<n.len:
@@ -682,16 +682,16 @@ proc getConstExpr(m: PSym, n: PNode; g: ModuleGraph): PNode =
     if (n.len > 0) and (n[0].kind == nkExprColonExpr):
       for i, expr in n.pairs:
         let exprNew = copyNode(expr) # nkExprColonExpr
-        exprNew.add expr[0]
+        exprNew.safeAdd expr[0]
         let a = getConstExpr(m, expr[1], g)
         if a == nil: return nil
-        exprNew.add a
-        result.add exprNew
+        exprNew.safeAdd a
+        result.safeAdd exprNew
     else:
       for i, expr in n.pairs:
         let a = getConstExpr(m, expr, g)
         if a == nil: return nil
-        result.add a
+        result.safeAdd a
     incl(result.flags, nfAllConst)
   of nkChckRangeF, nkChckRange64, nkChckRange:
     var a = getConstExpr(m, n[0], g)

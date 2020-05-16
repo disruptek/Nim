@@ -104,6 +104,9 @@ type
 const
   isNilConversion = isConvertible # maybe 'isIntConv' fits better?
 
+template add(n: PType; p: PType) = n.safeAdd p
+template add(n: PNode; p: PNode) = n.safeAdd p
+
 proc markUsed*(c: PContext; info: TLineInfo, s: PSym)
 proc markOwnerModuleAsUsed*(c: PContext; s: PSym)
 

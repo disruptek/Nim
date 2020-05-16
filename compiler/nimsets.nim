@@ -93,15 +93,15 @@ proc toTreeSet*(conf: ConfigRef; s: TBitSet, settype: PType, info: TLineInfo): P
       let aa = newIntTypeNode(a + first, elemType)
       aa.info = info
       if a == b:
-        result.add aa
+        result.safeAdd aa
       else:
         n = newNodeI(nkRange, info)
         n.typ = elemType
-        n.add aa
+        n.safeAdd aa
         let bb = newIntTypeNode(b + first, elemType)
         bb.info = info
-        n.add bb
-        result.add n
+        n.safeAdd bb
+        result.safeAdd n
       e = b
     inc(e)
 

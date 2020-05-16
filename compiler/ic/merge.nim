@@ -11,8 +11,17 @@
 ## is needed for incremental compilation.
 
 import
-  ast, ropes, options, strutils, nimlexbase, cgendata, rodutils,
-  intsets, llstream, tables, modulegraphs, pathutils
+
+  ".." / [ ast, ropes, options, nimlexbase, cgendata, rodutils,
+  llstream, modulegraphs, pathutils ]
+
+import
+
+  std / [ intsets, tables, strutils ]
+
+import
+
+  spec, utils
 
 # Careful! Section marks need to contain a tabulator so that they cannot
 # be part of C string literals.
@@ -73,7 +82,7 @@ proc genSectionEnd*(ps: TCProcSection; conf: ConfigRef): Rope =
   if compilationCachePresent(conf):
     result = rope(NimMergeEndMark & "\n")
 
-proc writeTypeCache(a: TypeCache, s: var string) =
+proc writeTypeCache(a: TypeCache, s: var EncodingString) =
   var i = 0
   for id, value in pairs(a):
     if i == 10:
@@ -84,18 +93,6 @@ proc writeTypeCache(a: TypeCache, s: var string) =
     encodeStr($id, s)
     s.add(':')
     encodeStr($value, s)
-    inc i
-  s.add('}')
-
-proc writeIntSet(a: IntSet, s: var string) =
-  var i = 0
-  for x in items(a):
-    if i == 10:
-      i = 0
-      s.add('\L')
-    else:
-      s.add(' ')
-    encodeVInt(x, s)
     inc i
   s.add('}')
 

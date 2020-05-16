@@ -672,8 +672,7 @@ proc processCategory(r: var TResults, cat: Category,
                      runJoinableTests: bool) =
   case cat.string.normalize
   of "ic":
-    when false:
-      icTests(r, testsDir, cat, options)
+    icTests(r, testsDir, cat, options)
   of "js":
     # only run the JS tests on Windows or Linux because Travis is bad
     # and other OSes like Haiku might lack nodejs:
