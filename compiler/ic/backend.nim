@@ -264,16 +264,28 @@ proc getSetConflictFromCache(m: BModule; s: PSym; create = true): string =
   assert counter > 0
   m.sigConflicts[sid] = counter
 
-proc getOrSet(conflicts: ConflictsTable; name: string; counter: var int): bool =
-  counter = conflicts.getOrDefault(name, -1)
+proc getOrSet(conflicts: ConflictsTable; name: string;
+              counter: var int; id: int): bool =
+  ## set the counter to indicate the number of collisions at the time the
+  ## name was added to the conflicts table.  requires a unique id for the
+  ## symbol being added to the table.  returns true if this is the
+  ## first instance of the name to enter the table.
+  let sid = $id
+  counter = conflicts.getOrDefault(sid, -1)
   if counter == -1:
-    conflicts[name] = 1
-    counter = 0
+    counter = conflicts.getOrDefault(name, -1)
+    if counter == -1:
+      # start counting at zero so we can omit an initial append
+      counter = 0
+      # set the value for the name indicate the NEXT available counter
+      conflicts[name] = 1
+    else:
+      # set the value for the name indicate the NEXT available counter
+      inc conflicts[name]
+    conflicts[sid] = counter
     result = true
-  else:
-    inc conflicts[name]
 
-proc getSetConflict*(p: ModuleOrProc; s: PSym;
+proc getSetConflict(p: ModuleOrProc; s: PSym;
                      create = true): tuple[name: string; counter: int] =
   ## take a backend module or a procedure being generated and produce an
   ## appropriate name and the instances of its occurence, which may be
@@ -295,20 +307,20 @@ proc getSetConflict*(p: ModuleOrProc; s: PSym;
         # we can use the IC cache to determine the right name and counter
         # for this symbol
 
-        name = m.getSetConflictFromCache(s, create = create)
-        break
+        when false:
+          name = m.getSetConflictFromCache(s, create = create)
+          assert false, "this code needs work"
+          break
 
     name = p.mangle(s)
 
-  if p.sigConflicts.getOrSet(name, counter):
+  if p.sigConflicts.getOrSet(name, counter, s.id):
     if not create:
       debug s
       assert false, "cannot find existing name for: " & name
   result = (name: name, counter: counter)
 
   # FIXME: add a pass to warm up the conflicts cache
-
-  assert result.counter >= 0
   assert result.name.len > 0
 
 template maybeAppendCounter(result: typed; count: int) =
@@ -1486,7 +1498,7 @@ template mutateLocation*(m: BModule; p: PSym or PType; body: untyped): untyped =
           echo "symbol is ", p.id
           #writeStackTrace()
           #echo "-====================-"
-          quit(1)
+          #raise
       setLocation(m, p, mloc)
 
 proc setRope*(m: BModule; p: PSym or PType; roap: Rope) {.tags: [TreeSafe, TreeRead, TreeWrite, RootEffect].} =

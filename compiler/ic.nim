@@ -53,7 +53,7 @@ export
 # backend API
 export
 
-  getSetConflict, rawNewModule, getTempName, idOrSig,
+  rawNewModule, getTempName, idOrSig,
   performCaching,
   irrelevantForBackend,
   getTypeName, # getTypeName used in ccgtypes; (BModule, PType, SigHash)
