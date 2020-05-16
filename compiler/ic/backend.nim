@@ -138,6 +138,7 @@ proc typeName(m: ModuleOrProc; typ: PType; shorten = false): string =
   case typ.kind
   of tySet, tySequence, tyTypeDesc, tyArray:
     result = shortKind(typ.kind)
+    result.add "_"
     result.add typeName(m, typ.lastSon, shorten = shorten)
   of tyVar, tyRef, tyPtr:
     # omit this verbosity for now
@@ -148,7 +149,7 @@ proc typeName(m: ModuleOrProc; typ: PType; shorten = false): string =
     elif shorten:
       result = mangle(typ.sym.name.s)
     else:
-      result = shortKind(typ.kind) & "_" & mangle(m, typ.sym)
+      result = mangle(m, typ.sym)
 
 proc getTypeName(m: BModule; typ: PType): Rope =
   block found:
