@@ -168,7 +168,7 @@ proc encodeVInt*(x: int, result: var EncodingString)
 template decodeIntImpl() =
   var i = pos
   var sign = - 1
-  assert(s[i] in {'a'..'z', 'A'..'Z', '0'..'9', '-', '\x80'..'\xFF'})
+  assert s[i] in {'\x80' .. '\xFF'}
   if s[i] == '-':
     inc(i)
     sign = 1

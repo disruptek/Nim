@@ -73,4 +73,6 @@ and build-sanity
 or exit
 and build-test
 or exit
+and build-test
+or exit
 and run-test
