@@ -20,6 +20,7 @@ import
 type
   EncodingString* = distinct string
   EncodingKind* = enum
+    InvalidEncoding
     FileNum = "unused?"
     OpenType
     CloseType
@@ -44,6 +45,7 @@ type
     AnType
     AnNode
     AnIdent
+    AnLibrary
     LocStorage
     LockLevel
     PaddingAtEnd
@@ -121,18 +123,23 @@ const
 template encodeIntImpl(self) =
   var d: char
   var v = x
-  var rem = v mod 190
+  var rem = v mod 128
   if rem < 0:
-    result.add('-')
-    v = - (v div 190)
-    rem = - rem
+    result.add '-'
+    v = -(v div 128)
+    rem = -rem
   else:
-    v = v div 190
-  var idx = int(rem)
-  if idx < 62: d = chars[idx]
-  else: d = chr(idx - 62 + 128)
-  if v != 0: self(v, result)
-  result.add(d)
+    v = v div 128
+  var idx = int rem
+  when false:
+    if idx < 62:
+      d = chars[idx]
+    else:
+      d = chr(idx - 62 + 128)
+  d = idx.chr
+  if v != 0:
+    self(v, result)
+  result.add d
 
 proc encodeVBiggestIntAux(x: BiggestInt, result: var EncodingString) =
   ## encode a biggest int as a variable length base 190 int.
@@ -146,7 +153,7 @@ proc add*(e: var EncodingString; i: BiggestInt) =
   ## encode a biggest int as a variable length base 190 int.
   encodeVBiggestIntAux(i +% vintDelta, e)
 
-proc add*(e: var EncodingString; i: int | uint16 | int16 | int32) =
+proc add*(e: var EncodingString; i: int | int8 | uint16 | int16 | int32) =
   ## encode an int as a variable length base 190 int.
   encodeVIntAux(i.int +% vintDelta, e)
 
@@ -168,7 +175,7 @@ proc encodeVInt*(x: int, result: var EncodingString)
 template decodeIntImpl() =
   var i = pos
   var sign = - 1
-  assert s[i] in {'\x80' .. '\xFF'}
+  #assert s[i] in {'\x80' .. '\xFF'}
   if s[i] == '-':
     inc(i)
     sign = 1
@@ -179,7 +186,9 @@ template decodeIntImpl() =
     #of 'a'..'z': result = result * 190 - (ord(s[i]) - ord('a') + 10)
     #of 'A'..'Z': result = result * 190 - (ord(s[i]) - ord('A') + 36)
     #of '\x80'..'\xFF': result = result * 190 - (ord(s[i]) - 128 + 62)
-    of '\x80'..'\xFF': result = result * 128 - (ord(s[i]) - 128)
+    of '\x80'..'\xFF':
+      echo result, " ", ord(s[i])
+      result = result * 128 - (ord(s[i]) - 128)
     else: break
     inc(i)
   result = result * sign -% vintDelta

@@ -182,6 +182,7 @@ proc encodeNode*(g: ModuleGraph; fInfo: TLineInfo; n: PNode;
     result.add OpenNode, CloseNode
     return
   result.add OpenNode
+  result.add n.kind.int8
   # we do not write comments for now
   # Line information takes easily 20% or more of the filesize! Therefore we
   # omit line information if it is the same as the parent's line information:
@@ -195,18 +196,6 @@ proc encodeNode*(g: ModuleGraph; fInfo: TLineInfo; n: PNode;
   if n.typ != nil:
     result.add UniqueId
     result.add n.typ.uniqueId
-
-    when false:
-      if n.typ.sym == nil:
-        echo "ENCODE NODE WITH NIL TYP.SYM"
-        debug n.typ
-        when false:
-          if n.kind == nkSym and n.sym != nil:
-            n.typ.sym = n.sym
-          else:
-            echo "IT IS AN ", n.kind
-            raise
-
     pushType(w, n.typ)
   case n.kind
   of nkCharLit..nkUInt64Lit:
@@ -333,11 +322,11 @@ proc encodeType(g: ModuleGraph, t: PType, result: var EncodingString) =
       pushType(w, t[i])
 
 proc encodeLib(g: ModuleGraph, lib: PLib, info: TLineInfo, result: var EncodingString) =
-  result.add('|')
+  result.add AnLibrary
   result.add ord(lib.kind)
-  result.add('|')
+  result.add AnLibrary
   encodeStr($lib.name, result)
-  result.add('|')
+  result.add AnLibrary
   encodeNode(g, info, lib.path, result)
 
 proc encodeInstantiations(g: ModuleGraph; s: seq[PInstantiation];
@@ -356,7 +345,8 @@ proc encodeInstantiations(g: ModuleGraph; s: seq[PInstantiation];
 proc encodeSym(g: ModuleGraph, s: PSym, result: var EncodingString) =
   if s == nil:
     # nil nodes have to be stored too:
-    result.add("{}")
+    result.add OpenSym
+    result.add CloseSym
     return
   # we need no surrounding {} here because the symbol is in a line of its own
   result.add ord(s.kind)
@@ -640,29 +630,37 @@ proc loadType*(g; id: int, info: TLineInfo): PType
 
 proc decodeLineInfo(g; b; info: var TLineInfo) =
   if b.s[b.pos] in {JustCol, LineAndCol, LineColFile}:
-    inc(b.pos)
-    if b.s[b.pos] == Comma: info.col = -1'i16
-    else: info.col = int16(decodeVInt(b.s, b.pos))
-    if b.s[b.pos] == Comma:
-      inc(b.pos)
-      if b.s[b.pos] == Comma: info.line = 0'u16
-      else: info.line = uint16(decodeVInt(b.s, b.pos))
+    inc b.pos
+    info.col =
       if b.s[b.pos] == Comma:
-        inc(b.pos)
-        #info.fileIndex = fromDbFileId(g.incr, g.config, decodeVInt(b.s, b.pos))
+        -1'i16
+      else:
+        int16(decodeVInt(b.s, b.pos))
+    inc b.pos
+    if b.s[b.pos] == Comma:
+      inc b.pos
+      info.line =
+        if b.s[b.pos] == Comma:
+          0'u16
+        else:
+          uint16(decodeVInt(b.s, b.pos))
+      inc b.pos
+      if b.s[b.pos] == Comma:
+        inc b.pos
         info.fileIndex = FileIndex decodeVInt(b.s, b.pos)
+        inc b.pos
 
 proc skipNode(b) =
   # ')' itself cannot be part of a string literal so that this is correct.
-  assert b.s[b.pos] == '('
+  assert b.s[b.pos] == OpenNode
   var par = 0
   var pos = b.pos+1
   while true:
     case b.s[pos]
-    of ')':
+    of CloseNode:
       if par == 0: break
       dec par
-    of '(': inc par
+    of OpenNode: inc par
     else: discard
     inc pos
   b.pos = pos+1 # skip ')'
@@ -677,10 +675,10 @@ proc decodeNodeLazyBody(g; b; fInfo: TLineInfo,
       return                  # nil node
     result = newNodeI(TNodeKind(decodeVInt(b.s, b.pos)), fInfo)
     decodeLineInfo(g, b, result.info)
-    if b.s[b.pos] == '$':
+    if b.s[b.pos] == SomeFlags:
       inc(b.pos)
       result.flags = cast[TNodeFlags](int32(decodeVInt(b.s, b.pos)))
-    if b.s[b.pos] == '^':
+    if b.s[b.pos] == AnType:
       inc(b.pos)
       var id = decodeVInt(b.s, b.pos)
       result.typ = loadType(g, id, result.info)
@@ -727,9 +725,9 @@ proc decodeNodeLazyBody(g; b; fInfo: TLineInfo,
         addSonNilAllowed(result, decodeNodeLazyBody(g, b, result.info, nil))
         inc i
     if b.s[b.pos] == CloseNode: inc(b.pos)
-    else: internalError(g.config, result.info, "decodeNode: ')' missing")
+    else: internalError(g.config, result.info, "missing CloseNode")
   else:
-    internalError(g.config, fInfo, "decodeNode: '(' missing " & $b.pos)
+    internalError(g.config, fInfo, "missing OpenNode")
 
 proc decodeNode*(g; b; fInfo: TLineInfo): PNode =
   result = decodeNodeLazyBody(g, b, fInfo, nil)
@@ -913,7 +911,7 @@ proc loadSymFromBlob(g; b; info: TLineInfo): PSym =
   result = PSym(id: id, kind: k, name: ident)
   # read the rest of the symbol description:
   g.incr.r.syms.add(result.id, result)
-  if b.s[b.pos] == '^':
+  if b.s[b.pos] == AnType:
     inc(b.pos)
     result.typ = loadType(g, decodeVInt(b.s, b.pos), info)
   decodeLineInfo(g, b, result.info)
@@ -968,7 +966,7 @@ proc loadSymFromBlob(g; b; info: TLineInfo): PSym =
       result.bitsize = decodeVInt(b.s, b.pos).int16
   else: discard
 
-  if b.s[b.pos] == '(':
+  if b.s[b.pos] == OpenNode:
     #if result.kind in routineKinds:
     #  result.ast = nil
     #else:
