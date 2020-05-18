@@ -68,7 +68,7 @@ when true:
       else:
         p.module
     assert s.kind == skParam
-    m.setLocationRope(s, nil)
+    p.clearRope(s)
     m.sigConflicts.del $s.id
     result = mangleLocalName(p, s)
     if $result == "x_40":
