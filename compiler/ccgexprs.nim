@@ -1148,7 +1148,7 @@ proc genStrAppend(p: BProc, e: PNode, d: var TLoc) =
       else:
         lens.add(lenExpr(p, a))
         lens.add(" + ")
-      appends.add(ropecg(p.module, "#appendString($1, $2);$n /*pigs*/",
+      appends.add(ropecg(p.module, "#appendString($1, $2);$n",
                         [strLoc(p, dest), rdLoc(a)]))
   if optSeqDestructors in p.config.globalOptions:
     linefmt(p, cpsStmts, "#prepareAdd($1, $2$3);$n",
