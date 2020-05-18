@@ -1511,11 +1511,16 @@ proc setRope*(m: BModule; p: PSym or PType; roap: Rope) {.tags: [TreeSafe, TreeR
   mutateLocation(m, p):
     mloc.setRopeSecret roap
 
-proc clearRope*(m: BModule; p: PSym or PType) {.tags: [TreeWrite].} =
+proc clearRope*(m: BModule; p: PSym or PType)
+  {.tags: [TreeRead, TreeSafe, TreeWrite, RootEffect].} =
   when defined(debugTLoc):
     echo "clear mut"
   mutateLocation(m, p):
-    loc.setRopeSecret nil
+    mloc.setRopeSecret nil
+
+template clearRope*(p: BProc; s: PSym or PType)
+  {.tags: [TreeRead, TreeSafe, TreeWrite, RootEffect].} =
+  clearRope(p.module, s)
 
 template runMachine*(cache: var CacheUnit;
                      g: BModuleList; body: untyped): untyped =

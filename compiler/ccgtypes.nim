@@ -53,8 +53,7 @@ proc mangleLocalName(p: BProc | BModule; s: PSym): Rope =
       p.module
   result = s.loc.r
   if result == nil:
-    result = p.idOrSig(s)
-    m.setLocationRope(s, result)
+    m.setLocationRope(s, p.idOrSig(s))
     result = s.loc.r
     if s.kind != skTemp:
       writeMangledName(m.ndi, s, m.config)
@@ -63,8 +62,17 @@ when true:
 
   # IC hax
   proc mangleParamName(p: BProc or BModule; s: PSym): Rope =
+    template m(): BModule =
+      when p is BModule:
+        p
+      else:
+        p.module
     assert s.kind == skParam
+    m.setLocationRope(s, nil)
+    m.sigConflicts.del $s.id
     result = mangleLocalName(p, s)
+    if $result == "x_40":
+      debug s
 
 else:
   proc mangleParamName(p: BProc; s: PSym): Rope =
@@ -100,15 +108,11 @@ else:
       writeMangledName(m.ndi, s, m.config)
 
 proc scopeMangledParam(p: BProc; s: PSym) =
-  template m(): BModule = p.module
   ## parameter generation only takes BModule, not a BProc, so we have to
   ## remember these parameter names are already in scope to be able to
   ## generate unique identifiers reliably (consider that ``var a = a`` is
   ## even an idiom in Nim).
-  #let
-  #  r = p.idOrSig(param)
-  #module.setLocationRope(param, r)
-  m.setLocationRope s, mangleLocalName(m, s)
+  discard mangleLocalName(p, s)
 
 proc mapSetType(conf: ConfigRef; typ: PType): TCTypeKind =
   case int(getSize(conf, typ))
@@ -422,7 +426,7 @@ proc genProcParams(p: BProc or BModule, t: PType, rettype, params: var Rope,
                    weakDep=false) =
   template m(): BModule =
     when p is BProc:
-      {.error: "nah".}
+      p.module
     else:
       p
   params = nil
@@ -942,7 +946,7 @@ proc isNonReloadable(m: BModule, prc: PSym): bool =
 proc genProcHeader(p: BProc or BModule, prc: PSym, asPtr: bool = false): Rope =
   template m(): BModule =
     when p is BProc:
-      {.error: "nah".}
+      p.module
     else:
       p
   var
@@ -959,7 +963,7 @@ proc genProcHeader(p: BProc or BModule, prc: PSym, asPtr: bool = false): Rope =
     result.add "N_LIB_PRIVATE "
   var check = initIntSet()
   m.fillLoc(prc, locProc, prc.ast[namePos], mangleName(m, prc), OnUnknown)
-  genProcParams(m, prc.typ, rettype, params, check)
+  genProcParams(p, prc.typ, rettype, params, check)
   # handle the 2 options for hotcodereloading codegen - function pointer
   # (instead of forward declaration) or header for function body with "_actual" postfix
   let asPtrStr = rope(if asPtr: "_PTR" else: "")

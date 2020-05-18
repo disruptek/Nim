@@ -479,18 +479,22 @@ proc initLocalVar(p: BProc, v: PSym, immediateAsgn: bool) =
 
 proc getTemp(p: BProc, t: PType, result: var TLoc; needsInit=false) =
   ## pack a new temp name into the TLoc, which may have some data in it!
-  if result.k != locTemp or result.r == nil:
+  #if result.k in {locTemp, locNone} or result.r == nil:
+  when true:
     result.k = locTemp
     result.lode = lodeTyp t
     result.storage = OnStack
     result.flags = {}
-    result.setRope p.module.getTempName
+    result.setRope getTempName(p.module)
     linefmt(p, cpsLocals, "$1 $2;$n",
            [getTypeDesc(p.module, t), result.r])
     constructLoc(p, result, not needsInit)
+    # XXX: IC: witness?
     # hopefully not necessary
     #p.module.setLocation(t, result)
   else:
+    debug t
+    echo result
     assert false, "puke here"
 
 proc getTempCpp(p: BProc, t: PType, result: var TLoc; value: Rope) =
@@ -1042,7 +1046,7 @@ proc genProcBody(p: BProc; procBody: PNode) =
 
 proc genProcAux(m: BModule, prc: PSym) =
   var p = newProc(prc, m)
-  var header = genProcHeader(m, prc)
+  var header = genProcHeader(p, prc)
   var returnStmt: Rope = nil
   assert(prc.ast != nil)
 
