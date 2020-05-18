@@ -1518,8 +1518,7 @@ proc clearRope*(m: BModule; p: PSym or PType)
   mutateLocation(m, p):
     mloc.setRopeSecret nil
 
-template clearRope*(p: BProc; s: PSym or PType)
-  {.tags: [TreeRead, TreeSafe, TreeWrite, RootEffect].} =
+template clearRope*(p: BProc; s: PSym or PType) =
   clearRope(p.module, s)
 
 template runMachine*(cache: var CacheUnit;
