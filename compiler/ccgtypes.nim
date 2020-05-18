@@ -58,54 +58,33 @@ proc mangleLocalName(p: BProc | BModule; s: PSym): Rope =
     if s.kind != skTemp:
       writeMangledName(m.ndi, s, m.config)
 
-when true:
-
-  # IC hax
-  proc mangleParamName(p: BProc or BModule; s: PSym): Rope =
-    template m(): BModule =
-      when p is BModule:
-        p
-      else:
-        p.module
-    assert s.kind == skParam
-    p.clearRope(s)
-    m.sigConflicts.del $s.id
-    result = mangleLocalName(p, s)
-    if $result == "x_40":
-      debug s
-
-else:
-  proc mangleParamName(p: BProc; s: PSym): Rope =
-    ## we cannot use 'sigConflicts' here since we have a BModule, not a BProc.
-    ## Fortunately C's scoping rules are sane enough so that that doesn't
-    ## cause any trouble.
-    result = s.loc.r
-    let
-      m = p.module
-    when not defined(release):
-      if result != nil:
-        assert $result == $p.idOrSig(s), "was " & $result & " now " & $p.idOrSig(s)
-    if result == nil:
-      result = p.idOrSig(s)
-      # Take into account if HCR is on because of the following scenario:
-      #   if a module gets imported and it has some more importc symbols in it,
-      # some param names might receive the "_0" suffix to distinguish from what
-      # is newly available. That might lead to changes in the C code in nimcache
-      # that contain only a parameter name change, but that is enough to mandate
-      # recompilation of that source file and thus a new shared object will be
-      # relinked. That may lead to a module getting reloaded which wasn't intended
-      # and that may be fatal when parts of the current active callstack when
-      # performCodeReload() was called are from the module being reloaded
-      # unintentionally - example (3 modules which import one another):
-      #   main => proxy => reloadable
-      # we call performCodeReload() in proxy to reload only changes in reloadable
-      # but there is a new import which introduces an importc symbol `socket`
-      # and a function called in main or proxy uses `socket` as a parameter name.
-      # That would lead to either needing to reload `proxy` or to overwrite the
-      # executable file for the main module, which is running (or both!) -> error.
-      # XXX: see comments in compiler/ic/backend inside sanitizeName()
-      m.setLocationRope s, result
-      writeMangledName(m.ndi, s, m.config)
+proc mangleParamName(p: BProc or BModule; s: PSym): Rope =
+  template m(): BModule =
+    when p is BModule:
+      p
+    else:
+      p.module
+  assert s.kind == skParam
+  p.clearRope(s)
+  m.sigConflicts.del $s.id
+  result = mangleLocalName(p, s)
+  # Take into account if HCR is on because of the following scenario:
+  #   if a module gets imported and it has some more importc symbols in it,
+  # some param names might receive the "_0" suffix to distinguish from what
+  # is newly available. That might lead to changes in the C code in nimcache
+  # that contain only a parameter name change, but that is enough to mandate
+  # recompilation of that source file and thus a new shared object will be
+  # relinked. That may lead to a module getting reloaded which wasn't intended
+  # and that may be fatal when parts of the current active callstack when
+  # performCodeReload() was called are from the module being reloaded
+  # unintentionally - example (3 modules which import one another):
+  #   main => proxy => reloadable
+  # we call performCodeReload() in proxy to reload only changes in reloadable
+  # but there is a new import which introduces an importc symbol `socket`
+  # and a function called in main or proxy uses `socket` as a parameter name.
+  # That would lead to either needing to reload `proxy` or to overwrite the
+  # executable file for the main module, which is running (or both!) -> error.
+  # XXX: see comments in compiler/ic/backend inside sanitizeName()
 
 proc scopeMangledParam(p: BProc; s: PSym) =
   ## parameter generation only takes BModule, not a BProc, so we have to
