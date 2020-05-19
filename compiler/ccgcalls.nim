@@ -199,8 +199,8 @@ proc openArrayLoc(p: BProc, formalType: PType, n: PNode): Rope =
         linefmt(p, cpsStmts, "#nimPrepareStrMutationV2($1);$n", [byRefLoc(p, a)])
       if ntyp.kind == tyVar and not compileToCpp(p.module):
         var t: TLoc
-        t.setRope "(*$1)" % [a.rdLoc]
-        result = "(*$1)$3, $2" % [a.rdLoc, lenExpr(p, t), dataField(p)]
+        t.setRope "/*goats*/(*$1)" % [a.rdLoc]
+        result = "/*dogs*/(*$1)$3, $2" % [a.rdLoc, lenExpr(p, t), dataField(p)]
       else:
         result = "$1$3, $2" % [a.rdLoc, lenExpr(p, a), dataField(p)]
     of tyArray:
@@ -209,8 +209,8 @@ proc openArrayLoc(p: BProc, formalType: PType, n: PNode): Rope =
       case lastSon(a.t).kind
       of tyString, tySequence:
         var t: TLoc
-        t.setRope "(*$1)" % [a.rdLoc]
-        result = "(*$1)$3, $2" % [a.rdLoc, lenExpr(p, t), dataField(p)]
+        t.setRope "/*pigs*/(*$1)" % [a.rdLoc]
+        result = "/*birds*/(*$1)$3, $2" % [a.rdLoc, lenExpr(p, t), dataField(p)]
       of tyArray:
         result = "$1, $2" % [rdLoc(a), rope(lengthOrd(p.config, lastSon(a.t)))]
       else:
@@ -273,6 +273,7 @@ proc addActualSuffixForHCR(res: var Rope, module: PSym, sym: PSym) =
     res = res & "_actual".rope
 
 proc genPrefixCall(p: BProc, le, ri: PNode, d: var TLoc) =
+  ## generate a call "normally" f(o)
   var op: TLoc
   # this is a hotspot in the compiler
   initLocExpr(p, ri[0], op)
@@ -532,6 +533,7 @@ proc genPatternCall(p: BProc; ri: PNode; pat: string; typ: PType): Rope =
         result.add(substr(pat, start, i - 1))
 
 proc genInfixCall(p: BProc, le, ri: PNode, d: var TLoc) =
+  ## generate a call with c++ o.f() syntax
   var op: TLoc
   initLocExpr(p, ri[0], op)
   # getUniqueType() is too expensive here:

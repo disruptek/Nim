@@ -940,7 +940,9 @@ proc genSeqElem(p: BProc, n, x, y: PNode, d: var TLoc) =
               [rdLoc(b), lenExpr(p, a), raiseInstr(p)])
   if d.k == locNone: d.storage = OnHeap
   if skipTypes(a.t, abstractVar).kind in {tyRef, tyPtr}:
-    a.setRope ropecg(p.module, "(*$1)", [a.r])
+    # avoid a template buglet?
+    let r = ropecg(p.module, "/*monkeys*/(*$1)", [a.r])
+    a.setRope r
 
   if lfPrepareForMutation in d.flags and ty.kind == tyString and
       optSeqDestructors in p.config.globalOptions:

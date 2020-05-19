@@ -479,8 +479,7 @@ proc initLocalVar(p: BProc, v: PSym, immediateAsgn: bool) =
 
 proc getTemp(p: BProc, t: PType, result: var TLoc; needsInit=false) =
   ## pack a new temp name into the TLoc, which may have some data in it!
-  #if result.k in {locTemp, locNone} or result.r == nil:
-  when true:
+  if result.k in {locTemp, locNone} or result.r == nil:
     result.k = locTemp
     result.lode = lodeTyp t
     result.storage = OnStack

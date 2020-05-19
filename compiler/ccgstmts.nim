@@ -348,12 +348,12 @@ proc genSingleVar(p: BProc, v: PSym; vn, value: PNode) =
           assert(typ.len == typ.n.len)
           params.add(genOtherArg(p, value, i, typ))
         if params == nil:
-          lineF(p, cpsStmts, "$#;$n", [decl])
+          lineF(p, cpsStmts, "/*bees*/$#;$n", [decl])
         else:
-          lineF(p, cpsStmts, "$#($#);$n", [decl, params])
+          lineF(p, cpsStmts, "/*goats*/$#($#);$n", [decl, params])
       else:
         initLocExprSingleUse(p, value, tmp)
-        lineF(p, cpsStmts, "$# = $#;$n", [decl, tmp.rdLoc])
+        lineF(p, cpsStmts, "/*bugs*/$# = $#;$n", [decl, tmp.rdLoc])
       return
     assignLocalVar(p, vn)
     initLocalVar(p, v, imm)

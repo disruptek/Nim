@@ -1432,6 +1432,8 @@ proc setLocationRope*(m: BModule; p: PSym or PType; r: Rope) =
   ## set the symbol's location rope and then push the location
   ## into the module with a setLocation() for good measure
   var t = p.loc
+  if startsWith($r, "initDateTime"):
+    debug p
   t.setRopeSecret r
   m.setLocation(p, t)
 
