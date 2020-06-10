@@ -79,6 +79,10 @@ proc newModule(graph: ModuleGraph; fileIdx: FileIndex): PSym =
 proc compileModule*(graph: ModuleGraph; fileIdx: FileIndex; flags: TSymFlags): PSym =
   var flags = flags
   if fileIdx == graph.config.projectMainIdx2: flags.incl sfMainModule
+  var stream = if sfMainModule in flags and graph.config.projectIsStdin:
+    stdin.llStreamOpen
+  else:
+    nil
   result = graph.getModule(fileIdx)
   # if it doesn't exist yet
   if result == nil:
