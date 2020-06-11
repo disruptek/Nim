@@ -872,7 +872,6 @@ proc genProcHeader(p: ModuleOrProc, prc: PSym, asPtr: bool = false): Rope =
   genProcParams(p, prc.typ, rettype, params, check)
   # make sure we mangle the proc name after having mangled the 1st param
   fillLoc(prc.loc, locProc, prc.ast[namePos], mangleName(p, prc), OnUnknown)
-
   # handle the 2 options for hotcodereloading codegen - function pointer
   # (instead of forward declaration) or header for function body with
   # "_actual" postfix
