@@ -787,7 +787,7 @@ type
     storage*: TStorageLoc
     flags*: TLocFlags         # location's flags
     lode*: PNode              # Node where the location came from; can be faked
-    r*: Rope                  # rope value of location (code generators)
+    roap: Rope                # rope value of location (code generators)
 
   # ---------------- end of backend information ------------------------------
 
@@ -1044,6 +1044,7 @@ const
   defaultAlignment = -1
   defaultOffset = -1
 
+include ic/ast         # incremental compilation disruption
 
 proc getnimblePkg*(a: PSym): PSym =
   result = a

@@ -49,12 +49,37 @@ proc hcrOn(p: BProc): bool = p.module.config.hcrOn
 proc addForwardedProc(m: BModule, prc: PSym) =
   m.g.forwardedProcs.add(prc)
 
-proc initLoc(result: var TLoc, k: TLocKind, lode: PNode, s: TStorageLoc) =
-  result.k = k
-  result.storage = s
-  result.lode = lode
-  result.r = nil
-  result.flags = {}
+template r*(t: var TLoc): auto {.dirty.} =
+  ## Yields mutable location Ropes when possible; else immutables.
+  when declared(p):
+    when p is BProc:
+      t.r(p.module)
+    else:
+      let v = t
+      v.r
+  elif declared(m):
+    when m is BModule:
+      t.r(m)
+    else:
+      let v = t
+      v.r
+  else:
+    let v = t
+    v.r
+
+template initLoc(result: var TLoc, k: TLocKind, lode: PNode, s: TStorageLoc) {.dirty.} =
+  ## Avoids having to change a lot of code to insert boring references
+  ## to the local BModule or BProc governing the mutation of the TLoc.
+  block:
+    when declared(p):
+      when p is BProc:
+        initLoc(p.module, result, k, lode, s)
+        break
+    when declared(m):
+      when m is BModule:
+        initLoc(m, result, k, lode, s)
+        break
+    raise newException(Defect, "couldn't find local BProc or BModule")
 
 proc fillLoc(a: var TLoc, k: TLocKind, lode: PNode, r: Rope, s: TStorageLoc) =
   # fills the loc if it is not already initialized
