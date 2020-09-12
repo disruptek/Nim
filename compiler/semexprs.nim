@@ -2163,7 +2163,7 @@ proc instantiateCreateFlowVarCall(c: PContext; t: PType;
   # codegen would fail:
   if sfCompilerProc in result.flags:
     result.flags.excl {sfCompilerProc, sfExportc, sfImportc}
-    result.loc.r = nil
+    clear(result.loc, c)
 
 proc setMs(n: PNode, s: PSym): PNode =
   result = n

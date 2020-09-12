@@ -1,3 +1,4 @@
+import macros
 #[
 
 none of this backend-specific code should exist in ast, but...  here we are.
@@ -7,9 +8,6 @@ all this stuff is included into compiler/ast.
 ]#
 
 when not defined(release):
-  var rsets {.compileTime.}: int
-  var rgets {.compileTime.}: int
-
   proc `$`*(loc: TLoc): string =
     result.add "loc[" & $loc.k & "/" & $loc.storage & ": "
     result.add $loc.flags
@@ -17,7 +15,6 @@ when not defined(release):
 
 proc r*(t: TLoc): Rope =
   ## Capture location queries.
-  when not defined(release): inc rgets
   t.roap
 
 proc r*[T](t: var TLoc; m: T): var Rope =
@@ -25,20 +22,12 @@ proc r*[T](t: var TLoc; m: T): var Rope =
   when T is TLoc:
     {.warning: "potentially unsafe tloc r".}
   result = t.roap
-  when not defined(release):
-    inc rgets
-    inc rsets
 
-proc `r=`*(t: var TLoc; r: Rope) =
+macro `r=`*(t: var TLoc; r: Rope) =
   ## Capture location mutations.
-  assert r != nil, "use clear(BModule, TLoc)"
-  if t.roap != nil:
-    when not defined(release):
-      if $t.roap != $r:
-        echo "changing roap ", cast[uint](t.roap), " from ", $t.r, " to ", $r
-        echo "rsets ", rsets, " rgets ", rgets
-      inc rsets
-  t.roap = r
+  if r.kind == nnkNilLit:
+    error "use clear(TLoc, Witness)"
+  result = newAssignment(newDotExpr(t, ident"roap"), r)
 
 proc clear*[T](t: var TLoc; m: T) =
   ## Empty a location rope safely.
