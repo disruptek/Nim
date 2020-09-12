@@ -1351,10 +1351,6 @@ proc newType*(kind: TTypeKind, owner: PSym): PType =
                  lockLevel: UnspecifiedLockLevel)
   when debugIds:
     registerId(result)
-  when false:
-    if result.id == 76426:
-      echo "KNID ", kind
-      writeStackTrace()
 
 proc mergeLoc(a: var TLoc, b: TLoc) =
   if a.k == low(typeof(a.k)): a.k = b.k
