@@ -29,11 +29,16 @@ macro `r=`*(t: var TLoc; r: Rope) =
     error "use clear(TLoc, Witness)"
   result = newAssignment(newDotExpr(t, ident"roap"), r)
 
+proc clear*(t: var TLoc) =
+  ## Empty a location rope unsafely.
+  assert t.roap == nil
+  {.warning: "potentially unsafe tloc clear".}
+  t.roap = nil
+
 proc clear*[T](t: var TLoc; m: T) =
   ## Empty a location rope safely.
   when T is TLoc:
-    assert t.roap == nil
-    {.warning: "potentially unsafe tloc clear".}
+    {.error: "nah".}
   t.roap = nil
 
 proc clearLoc*[T](p: PSym or PType; m: T) =
