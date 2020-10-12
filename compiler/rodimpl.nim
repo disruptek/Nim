@@ -566,7 +566,7 @@ proc decodeLoc(g; b; loc: var TLoc, info: TLineInfo) =
       inc(b.pos)
       loc.r = rope(decodeStr(b.s, b.pos))
     else:
-      loc.r = nil
+      clear loc
     if b.s[b.pos] == '>': inc(b.pos)
     else: internalError(g.config, info, "decodeLoc " & b.s[b.pos])
 
