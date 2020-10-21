@@ -1,8 +1,8 @@
 discard """
   output: "1"
   cmd: r"nim c --hints:on $options -d:release $file"
-  ccodecheck: "'NI volatile state;'"
-  targets: "c"
+  ccodecheck: "'NI volatile state_;'"
+  target: "C"
 """
 
 # bug #1539
