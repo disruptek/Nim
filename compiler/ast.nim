@@ -895,6 +895,7 @@ type
     attachedTrace,
     attachedDispose,
     attachedDeepCopy
+  TAttachedOps* = array[TTypeAttachedOp, PSym] # destructors, etc.
 
   TType* {.acyclic.} = object of TIdObj # \
                               # types are identical iff they have the
@@ -916,7 +917,7 @@ type
     owner*: PSym              # the 'owner' of the type
     sym*: PSym                # types have the sym associated with them
                               # it is used for converting types to strings
-    attachedOps*: array[TTypeAttachedOp, PSym] # destructors, etc.
+    attachedOps*: TAttachedOps # destructors, etc.
     methods*: seq[(int,PSym)] # attached methods
     size*: BiggestInt         # the size of the type in bytes
                               # -1 means that the size is unkwown
@@ -928,6 +929,7 @@ type
                               # type.
     uniqueId*: int            # due to a design mistake, we need to keep the real ID here as it
                               # required by the --incremental:on mode.
+    icSealed*: bool
 
   TPair* = object
     key*, val*: RootRef

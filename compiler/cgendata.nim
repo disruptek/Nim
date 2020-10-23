@@ -199,6 +199,56 @@ type
     g*: BModuleList
     ndi*: NdiFile
 
+    # move all this transform stuff into ic backend?
+    transforms*: TransformTable
+
+  TransformKind* = enum
+    Unknown
+    HeaderFile
+    ProtoSet
+    ThingSet
+    FlagSet
+    TypeStack
+    Injection
+    GraphRope
+    InitProc
+    PreInit
+    Labels
+    SetLoc
+    LiteralData
+
+  TransformTable* = OrderedTable[SigHash, Transform]
+
+  Transform* = object
+    module*: BModule
+    case kind*: TransformKind
+    of Unknown:
+      discard
+    of FlagSet:
+      flags*: set[CodegenFlag]
+    of ProtoSet, ThingSet:
+      diff*: IntSet
+    of HeaderFile:
+      filenames*: seq[string]
+    of TypeStack:
+      stack*: TTypeSeq
+    of Injection:
+      rope*: Rope
+    of GraphRope:
+      field*: string
+      grope*: Rope
+    of InitProc, PreInit:
+      prc*: PSym
+    of Labels:
+      labels*: int
+    of SetLoc:
+      nkind*: TNodeKind
+      id*: int
+      loc*: TLoc
+    of LiteralData:
+      node*: PNode
+      val*: int
+
 const
   irrelevantForBackend* = {tyGenericBody, tyGenericInst, tyOwned,
                            tyGenericInvocation, tyDistinct, tyRange,
