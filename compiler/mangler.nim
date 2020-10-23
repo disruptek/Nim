@@ -674,7 +674,7 @@ proc mangleParamName*(p: BProc; s: PSym): Rope =
   if s.loc.r == nil or $conflictKey(s) notin p.sigConflicts:
     # discard any existing counter for this sym from the module scope
     purgeConflict(p.module, s)
-    s.loc.r = nil              # critically, destroy the location
+    clearLoc(s, p)             # critically, destroy the location
     s.loc.r = mangleName(p, s) # then mangle it using the proc scope
   result = s.loc.r
   if result == nil:
