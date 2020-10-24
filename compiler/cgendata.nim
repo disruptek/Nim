@@ -101,7 +101,6 @@ type
     withinBlockLeaveActions*: int # complex to explain
     sigConflicts*: ConflictsTable
 
-  TTypeSeq* = seq[PType]
   TypeCache* = Table[SigHash, Rope]
   TypeCacheWithOwner* = Table[SigHash, tuple[str: Rope, owner: PSym]]
 
